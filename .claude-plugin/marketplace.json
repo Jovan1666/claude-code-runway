@@ -1,0 +1,22 @@
+{
+  "name": "claude-code-runway",
+  "description": "Show your Command Code plan quota above the prompt in Claude Code.",
+  "owner": {
+    "name": "Jovan1666",
+    "url": "https://github.com/Jovan1666"
+  },
+  "plugins": [
+    {
+      "name": "runway",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "在你的 Agent 的 Claude Code 里显示 Command Code 套餐额度。三个窗口（5h / 周 / 月）各一条「落点条」，一眼看清会不会在周期结束前烧完。",
+      "category": "utilities",
+      "homepage": "https://github.com/Jovan1666/claude-code-runway",
+      "author": {
+        "name": "Jovan1666",
+        "url": "https://github.com/Jovan1666"
+      }
+    }
+  ]
+}

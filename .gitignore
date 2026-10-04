@@ -1,0 +1,11 @@
+# Claude Code 自动生成，随版本变化，不要提交
+.claude-plugin/types/
+tsconfig.json
+
+# 预览工具生成的中间产物
+tools/mock.html
+
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

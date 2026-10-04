@@ -1,0 +1,4 @@
+{
+  "description": "runway: 把 Command Code 套餐额度画在输入框上方，并注册 /quota 命令",
+  "modules": ["./register.mjs"]
+}

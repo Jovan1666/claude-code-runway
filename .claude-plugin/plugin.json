@@ -1,0 +1,12 @@
+{
+  "name": "runway",
+  "version": "0.1.0",
+  "description": "在输入框上方显示 Command Code 套餐额度：还剩多少、还能撑多久、会不会超",
+  "author": {
+    "name": "Jovan1666",
+    "url": "https://github.com/Jovan1666"
+  },
+  "license": "MIT",
+  "keywords": ["mods", "quota", "usage", "commandcode", "claude-code"],
+  "dependencies": ["token-weather@claude-code-playground-mods"]
+}
