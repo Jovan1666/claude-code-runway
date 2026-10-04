@@ -115,7 +115,8 @@ export function register(on) {
     // 以前读 e.bodyColumns / e.hasSurvey，两者恒为 undefined ——
     // 后果是 band 永远按兜底的 80 列排版（宽屏浪费、窄屏溢出），
     // 而且问卷出现时不让位，两块内容叠在一起。
-    if (e.props.hasSurvey || !snap) return rest; // 有问卷时让位；没数据时不占位置
+    // 这句在 try 之外，所以对 props 缺失也要免疫（缺了就当没有问卷）。
+    if (!snap || (e.props && e.props.hasSurvey)) return rest; // 有问卷时让位；没数据时不占位置
     // 2.1.288 上，ui.render 抛错或交回坏树会让**整个会话**以
     // "unrecoverable interface error" 结束（2.1.289 才改成引擎自己兜底）。
     // 所以在自己这层就吞掉，画不出来就让位。
@@ -409,7 +410,7 @@ function renderRow($, e) {
   // 于是这一行永远按兜底的 80 列排版：宽屏浪费、窄屏溢出被截。
   // 再减去 Box 自己的 paddingX: 1（左右各一格）—— 这两格以前完全没进预算，
   // 80 列的终端上这一行实际占 82 格，会折行。
-  const cols = Math.max(20, (e.props.bodyColumns ?? 80) - 2);
+  const cols = Math.max(20, (e.props?.bodyColumns ?? 80) - 2);
   const now = Date.now();
   const v = snap;
   const pace = computePace(v, now);
@@ -496,7 +497,7 @@ function renderPane($, e) {
   const pace = computePace(snap, now);
   const tier = tierOf(snap, pace);
   const stale = now - snapAt > TTL_MS * 2;
-  const cols = Math.max(30, e.props.bodyColumns ?? 56);
+  const cols = Math.max(30, e.props?.bodyColumns ?? 56);
 
   // 布局是纯函数，这里只负责把段变成元素、把按钮接到处理函数
   const handlers = {
