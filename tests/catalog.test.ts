@@ -224,16 +224,26 @@ test('modelTable 的标题说清口径、模型数和新鲜度', () => {
   expect(head).toContain('刚刚更新');
 });
 
+// 标题要在**实机侧边栏宽度**里放得下。
+//
+// 50 是量出来的、不是猜的：`band-probe` 从引擎读到的 pane `bodyColumns` 就是 50
+// （mod 里 `$.ui.open({ columns: 78 })` 只是"请求值"）。放不下就被 `truncTo` 截断，
+// 而截掉的正好是结尾的新鲜度 —— 那是这张表最要紧的一句。
+// 这条锁的是"不许再写长"，不是某个具体措辞。
+test('modelTable 的标题在实机 50 列里放得下 —— 时效那句不能被截掉', () => {
+  const NOW = 1_000_000;
+  // 覆盖 catalogAge 的每一档 + 最长的那档（"47 小时前更新"最宽）
+  for (const mins of [0, 16, 300, 60 * 47, 60 * 24 * 3, 60 * 24 * 30]) {
+    const cat = { ...CAT, fetchedAt: NOW - mins * 60_000 };
+    const head = line(modelTable(cat, null, 50, NOW)[0]);
+    expect(dispWidth(head) <= 50).toBe(true);
+    expect(head).toContain('更新'); // 时效那句还在，没被切掉尾巴
+  }
+});
+
 const w = (r) => dispWidth(line(r));
 // 表格行 = 标题之后、脚注之前的那几行
 const tableRows = (rows) => rows;
-
-test('modelTable 的标题说清口径、模型数和新鲜度', () => {
-  const head = line(modelTable(CAT, null, 78, 1_000_000)[0]);
-  expect(head).toContain('每月可调用次数');
-  expect(head).toContain('2 个');
-  expect(head).toContain('刚刚更新');
-});
 
 test('modelTable **一行只能有一个段** —— 这是对齐的命根子', () => {
   // 面板把每个段渲染成独立的文本节点，而**节点边界的空白会被吃掉**。

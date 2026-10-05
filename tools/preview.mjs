@@ -161,11 +161,12 @@ async function main() {
 
   console.log('');
   console.log('──── 详情面板（按 1 打开）────');
-  // 两个宽度都打：面板的 `columns: 78` 只是**请求值**，窄窗口 / 用户拖动之后
-  // 实际可能窄得多，而侧边栏才是常态 —— 所以窄的那个也要看。
-  for (const cols of [58, 40]) {
+  // 两个宽度都打。**50 是真的**：`band-probe` 从引擎那里读到的
+  // `e.props.bodyColumns` 就是 50（`columns: 78` 只是请求值，引擎按侧边栏给了 50）。
+  // 40 是再往下留一档余量，看降级顺序对不对。
+  for (const cols of [50, 40]) {
     console.log('');
-    console.log('  ── ' + cols + ' 列' + (cols === 40 ? '（很窄）' : '（侧边栏常见）') + ' ──');
+    console.log('  ── ' + cols + ' 列' + (cols === 50 ? '（实机侧边栏就是 50）' : '（更窄，看降级）') + ' ──');
     console.log('');
     for (const r of layoutPane(v, pace, tier, cols, now, false, null, { catalog, diff: catDiff })) {
       if (r.kind === 'gap') {
