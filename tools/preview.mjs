@@ -101,14 +101,15 @@ async function main() {
   console.log(`接口  ${base}`);
 
   const t0 = Date.now();
-  const credits = await getJson(base + '/alpha/billing/credits', headers);
-  const subs = await getJson(base + '/alpha/billing/subscriptions', headers);
-  const since = subs && subs.data && subs.data.currentPeriodStart;
-  const summary = await getJson(
-    base + '/alpha/usage/summary' + (since ? '?since=' + encodeURIComponent(since) : ''),
-    headers,
-  );
-  console.log(`耗时  ${Date.now() - t0} ms（credits 与 subscriptions 并行，summary 串行）`);
+  // 三个请求并行，跟 mod 里 `refresh()` 的做法一致 ——
+  // `since` 与不传等价（实测：不传返回的就是当前计费周期），所以 summary 不必等 subscriptions。
+  // （这里以前是三个 await 串行，而打印出来的说明却写着"并行"，说明本身是错的。）
+  const [credits, subs, summary] = await Promise.all([
+    getJson(base + '/alpha/billing/credits', headers),
+    getJson(base + '/alpha/billing/subscriptions', headers),
+    getJson(base + '/alpha/usage/summary', headers),
+  ]);
+  console.log(`耗时  ${Date.now() - t0} ms（三个请求并行）`);
 
   const now = Date.now();
   const v = normalize({ credits, subscription: subs, summary }, { now, apiBase: base });

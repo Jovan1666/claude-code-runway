@@ -423,17 +423,27 @@ function refresh($) {
       };
 
       // whoami 整个省掉：实测 org 恒为 null，credits 不需要 orgId。
-      // credits 与 subscriptions 无依赖，并行；summary 依赖 subscriptions 的周期起点，串行。
-      const [credits, subs] = await Promise.all([
+      // 三个请求**并行**。
+      //
+      // 以前 summary 串行等 subscriptions，就为了拿它的周期起点当 `since`。
+      // 实测（2026-10-05 逐端点验过）不必：
+      //   · `since` 是已注册参数（传坏值 400；`from`/`start`/`after` 那些一律被忽略）；
+      //   · 但它只是"事件时间下界"，而**不传时返回的本来就是当前计费周期**
+      //     （响应里 `periodBasis: "billing-period"`）—— 传周期起点、传更早、不传，三者数值相同。
+      // 所以周期起点优先用上一轮的缓存，拿不到就不传（等价），换来少一次往返。
+      //
+      // 顺带：这正是"已花 + 余额 = 月总额"成立的原因 —— summary 就是本周期口径。
+      const sinceMs = snap && snap.plan ? snap.plan.periodStartMs : null;
+      const since = sinceMs ? new Date(sinceMs).toISOString() : null;
+      const [credits, subs, summary] = await Promise.all([
         getJson($, base + '/alpha/billing/credits', headers),
         getJson($, base + '/alpha/billing/subscriptions', headers),
+        getJson(
+          $,
+          base + '/alpha/usage/summary' + (since ? '?since=' + encodeURIComponent(since) : ''),
+          headers,
+        ),
       ]);
-      const since = subs && subs.data && subs.data.currentPeriodStart;
-      const summary = await getJson(
-        $,
-        base + '/alpha/usage/summary' + (since ? '?since=' + encodeURIComponent(since) : ''),
-        headers,
-      );
 
       const now = Date.now();
       // 不把 apiBase / 凭据来源写进 view：它们对界面没用，

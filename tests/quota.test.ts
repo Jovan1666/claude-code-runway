@@ -13,11 +13,13 @@ import {
   fitSegments,
   fmtDay,
   fmtMoney,
+  fmtPct,
   landingParts,
   layoutPane,
   layoutRow,
   levelColor,
   meterParts,
+  modelTableText,
   normalize,
   planInfo,
   projectWindow,
@@ -63,6 +65,13 @@ function raw() {
 }
 
 const view = (now = NOW) => normalize(raw(), { now, apiBase: 'https://api.commandcode.ai' });
+
+// 接口**没返回** monthlyCredits 的响应（不是 0，是字段不在）—— 实测这种响应存在
+const rawForNoMonthly = () => {
+  const r = raw();
+  delete r.credits.credits.monthlyCredits;
+  return r;
+};
 
 // 5h 窗口已启动的版本：小条只在启动后才画，所以窄宽度降级的用例要用它
 const view5h = (now = NOW) => {
@@ -756,3 +765,53 @@ test('band 开头用的就是这个名字 —— 加一档也不会空着', () =
   expect(first.id).toBe('plan');
   expect(first.text).toBe('Titan');
 });
+
+// ────────────────────────────────────────────────────────────
+// 这两个是审计抓出来的真 bug（都用合成值复现过）
+// ────────────────────────────────────────────────────────────
+
+test('余额字段缺失 **不等于** 额度用完 —— 不能凭一个缺字段弹「额度已用尽」', () => {
+  // 原来的行为：monthlyCredits 拿不到 → remaining=0 → used=total=已花 → percent 恒 100%
+  // → tierOf 判「断粮」→ announce() 弹「额度已用尽 · 剩 $0.00」。
+  // 一个字段没返回，就伪造出最严重的那个警报。
+  const raw = rawForNoMonthly();
+  const v = normalize(raw, { now: NOW });
+  expect(v.monthly.unknown).toBe(true);
+  expect(v.monthly.percent).toBe(null);
+  expect(v.monthly.rawPercent).toBe(null);
+  expect(tierOf(v, computePace(v, NOW)).word).toBe('无数据');
+  expect(tierOf(v, computePace(v, NOW)).word).not.toBe('断粮');
+  // 界面拿到 null 会显示「—」，不是 0% 也不是 100%
+  expect(fmtPct(v.monthly.percent)).toBe('—');
+});
+
+test('余额拿得到时一切照旧 —— 这个守卫不能误伤正常数据', () => {
+  const v = view();
+  expect(v.monthly.unknown).toBe(false);
+  expect(Number.isFinite(v.monthly.percent)).toBe(true);
+});
+
+test('接口没给窗口上限时**不给百分比** —— 拿档位表兜底算出来的数是假的', () => {
+  const raw = rawForNoMonthly();
+  raw.credits.windowLimits.fiveHour.cap = undefined; // 接口省略 cap
+  const v = normalize(raw, { now: NOW });
+  expect(v.windows.fiveHour.capKnown).toBe(false);
+  expect(v.windows.fiveHour.percent).toBe(null);
+  expect(fmtPct(v.windows.fiveHour.percent)).toBe('—');
+  // 接口给了 cap 的就照常
+  expect(v.windows.weekly.capKnown).toBe(true);
+  expect(Number.isFinite(v.windows.weekly.percent)).toBe(true);
+});
+
+test('planInfo 精确匹配 —— 新档位不能被误配成老档位（那会让上限跟着错）', () => {
+  expect(planInfo('individual-goat').name).toBe('GOAT');
+  expect(planInfo('individual-max-10x').name).toBe('Max 10x');
+  // 这些是"以已知键开头的新档位"，以前的前缀匹配会把它们套上老档位的上限
+  expect(planInfo('individual-gold')).toBe(null);
+  expect(planInfo('individual-go-ultra')).toBe(null);
+  expect(planInfo('individual-max-10x-plus')).toBe(null);
+  // 官方 planId 本来就不在表里 → null，由 prettyPlanName 出名字
+  expect(planInfo('individual-max')).toBe(null);
+  expect(prettyPlanName('individual-max')).toBe('Max');
+});
+

@@ -398,6 +398,12 @@ node tools/privacy-scan.mjs --all  # 连未跟踪的文件一起扫
 
 ## 已知限制
 
+- **依赖的是官方「未公开」的接口。** `commandcode.ai/docs` 只承认 `/provider/v1/*`
+  （chat / responses / models 那些），**billing / credits / usage / plans 一律不在文档里** ——
+  `/alpha/*` 是 Studio 网页自己在用的内部路由（实测探了 20 个候选端点，除 `/alpha/whoami`
+  外全 404，404 正文自述 "is not a registered API route"）。所以它**随时可能变更或收紧**。
+  这也是为什么月额度只能靠"已花 + 余额"推 —— 官方没有给这个数的端点。
+
 - 只在终端与 Claude Desktop 的 Code tab 渲染。VS Code 面板、`claude -p`、云会话**不绘制**。
 - **只统计走 Command Code 这个 provider 的消耗。** 切到别的 provider，这里的数字不会动。
 - 档位判定与落点外推用的是**窗口内均速**，不是最近一小时的速度。周期内速度变化大时会偏保守。

@@ -437,3 +437,11 @@ test('框线只用 ASCII —— box-drawing 是 Ambiguous 宽度，字体说了�
   const all = modelTable(ALL, NEW_ONLY, 66, 1_000_000).map(line).join('');
   expect(/[─-╿]/.test(all)).toBe(false); // 一个 box-drawing 字符都不许有
 });
+
+test('/quota models 的脚注不许写死 token 用量 —— 每行 shape 本来就不一样', () => {
+  const text = modelTableText(ALL, NEW_ONLY, 1_000_000);
+  // 以前写着「输入 800 / 输出 200 / 缓存读 50,000」，实测输出有 125/150/160/180/200 好几种
+  expect(text).not.toMatch(/800\s*\/\s*200/);
+  expect(text).not.toContain('50,000 tokens');
+  expect(text).toContain('token 形状');
+});
