@@ -691,10 +691,12 @@ function renderPane($, e) {
         if (s.id === 'copy') props.autoFocus = true;
         return Button(props);
       }
-      // 带明确列宽的格子：交给**布局**去对齐，而不是在字符串里补空格。
-      // 补空格在这条渲染路径上没用 —— 弹性布局会把连续空格吃掉，
-      // 于是表格的列全塌在一起（模型次数表第一版就是这样）。
-      if (s.width) {
+      // 带**显式对齐**的格子才包成定宽 Box。
+      //
+      // 这里原来是 `if (s.width)` —— 而 T() 给**每一段**都设了 width，
+      // 于是整个面板的每一段都被包进定宽 Box，把原来靠空格对齐的布局全打散了
+      // （模型表只是最明显的一处）。所以改成显式 opt-in：只有真的想要列宽的段才带 align。
+      if (s.align) {
         return Box({
           key: 'rw-' + s.id,
           width: s.width,

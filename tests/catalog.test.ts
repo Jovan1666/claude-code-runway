@@ -203,65 +203,78 @@ const NEW_ONLY = catalogDiff(CAT, ALL); // Qwen 是新的，DeepSeek 改了价�
 
 const textOf = (rows) => rows.map((r) => r.map((x) => x.text).join(''));
 const cells = (rows) => rows.map((r) => r.map((x) => x.text));
+// 一行拼成一句，用来做"读起来对不对"的断言
+const line = (row) => row.map((x) => x.text).join('');
 
-test('modelTable 表头写清是谁的表、多少个模型、什么时候抓的', () => {
-  const head = cells(modelTable(CAT, null, 78, 1_000_000))[0].join(' ');
-  expect(head).toContain('模型次数');
-  expect(head).toContain('2 个模型');
+test('modelTable 的标题说清口径、模型数和新鲜度', () => {
+  const head = line(modelTable(CAT, null, 78, 1_000_000)[0]);
+  expect(head).toContain('每月可调用次数');
+  expect(head).toContain('2 个');
   expect(head).toContain('刚刚更新');
 });
 
-test('modelTable 有列头 —— 没有它，右边三个数字谁是谁只能靠猜', () => {
-  const cols = cells(modelTable(CAT, null, 78, 1_000_000))[1];
-  expect(cols.map((c) => c.trim())).toEqual(['模型', '每月', '5h', '周', '变动']);
+test('modelTable 一行一个模型：名字、次数、可选标记 —— 不排成列', () => {
+  const rows = modelTable(CAT, null, 78, 1_000_000);
+  // 标题之后第一行就是第一名
+  expect(line(rows[1])).toContain('DeepSeek V4.1 Flash');
+  expect(line(rows[1])).toContain('154,000');
+  expect(line(rows[1])).toContain('次/月');
+  // 表按每月次数降序 —— 每美元买到最多请求的排最前
+  expect(line(rows[1])).toContain('154,000');
+  expect(line(rows[2])).toContain('2,070');
 });
 
-test('modelTable 把新增/改价的钉在最前面，并落在「变动」那一列', () => {
+test('modelTable 不依赖任何对齐机制 —— 没有列宽、没有靠空格撑宽度', () => {
+  // 这一条是那两次"列全塌在一起"的护栏。
+  // 面板里空格会被吃掉、定宽 Box 会被压回内容宽，两种机制都赌不得，
+  // 所以这块内容**根本不需要对齐**：名次就是信息，横向比数字交给 /quota models。
+  const rows = modelTable(ALL, NEW_ONLY, 90, 1_000_000);
+  for (const r of rows) {
+    for (const seg of r) {
+      expect(seg.width).toBe(undefined);
+      expect(seg.align).toBe(undefined);
+      expect(seg.text.includes('  ')).toBe(false); // 连续空格 = 在偷偷补宽度
+    }
+  }
+});
+
+test('modelTable 把新增/改价的钉在最前面，标记单独一段带颜色', () => {
   const cheaper = { ...DEEPSEEK, rates: { ...DEEPSEEK.rates, inputCost: 0.075 } };
   const withNew = { name: 'Qwen 4.0 Turbo', budgetUsd: 20, rates: { inputCost: 0.1, outputCost: 0.2, cacheReadCost: 0.001 }, shape: { inputTokens: 800, outputTokens: 200, cacheReadTokens: 50000 } };
   const next = buildCatalog(parsePlanEstimates(page([SOL, cheaper, withNew])), 'individual-goat', 2);
   const rows = modelTable(next, catalogDiff(CAT, next), 78, 2);
-  // 0 标题 / 1 列头 / 2、3 被钉住的两个
-  expect(rows[2][0].text).toContain('Qwen 4.0 Turbo');
-  expect(rows[2][4].text.trim()).toBe('★新');
-  expect(rows[2][4].color).toBe('success');
-  expect(rows[3][0].text).toContain('DeepSeek V4.1 Flash');
-  expect(rows[3][4].text.trim()).toBe('↑价');
-  expect(rows[3][4].color).toBe('warning');
-  // 变动列之外，名字本身不带颜色 —— 否则整张表看起来全是链接
-  expect(rows[2][0].color).toBe(null);
+  // 0 标题 / 1、2 被钉住的两个（★新 在前、↑价 在后）
+  expect(line(rows[1])).toContain('Qwen 4.0 Turbo');
+  expect(rows[1][4].text.trim()).toBe('★新');
+  expect(rows[1][4].color).toBe('success');
+  expect(line(rows[2])).toContain('DeepSeek V4.1 Flash');
+  expect(rows[2][4].text.trim()).toBe('↑价');
+  expect(rows[2][4].color).toBe('warning');
+  // 名字本身不带颜色 —— 否则整张表看起来全是链接
+  expect(rows[1][0].color).toBeFalsy();
 });
 
-test('modelTable 用固定列宽交给渲染器对齐，不在字符串里补空格', () => {
-  // 这条是那次"列全塌在一起"的护栏：面板是弹性布局、会话是 markdown 渲染，
-  // 两边都会吃掉连续空格 —— 靠空格对齐在这两条路径上都不成立。
-  const rows = modelTable(ALL, null, 90, 1_000_000);
-  const widths = rows.slice(1, -1).map((r) => r.map((c) => c.width));
-  for (const w of widths) expect(w).toEqual(widths[0]);
-  // 每个格子都不该用空格撑宽度（标题那一行不在此列，它本来就是个带前缀的行）
-  for (const r of rows.slice(1, -1)) for (const c of r) expect(c.text.includes('  ')).toBe(false);
-  // 数字列靠右、名字列靠左
-  const row = rows[2];
-  expect(row[0].align).toBe('left');
-  expect(row[1].align).toBe('right');
-});
-
-test('modelTable 窄的时候列宽收得住，名字被截断', () => {
-  const wide = modelTable(ALL, null, 90, 1_000_000);
-  const narrow = modelTable(ALL, null, 46, 1_000_000);
-  const sum = (rows) => rows[2].reduce((a, c) => a + c.width, 0);
-  expect(sum(narrow)).toBeLessThan(sum(wide));
-  expect(narrow[2][0].width).toBeGreaterThanOrEqual(10);
-  const names = cells(narrow).map((r) => r[0]);
-  expect(names.some((n) => n.includes('…'))).toBe(true);
+test('modelTable 窄的时候截断名字，且尾巴留得下', () => {
+  // 40 列还装得下最长那个名字（25 格），所以不会截断
+  const wide = cells(modelTable(ALL, null, 40, 1_000_000)).slice(1).map((r) => r[0]);
+  expect(wide.every((n) => !n.includes('…'))).toBe(true);
+  // 24 列装不下了 → 截断
+  const narrow = cells(modelTable(ALL, null, 24, 1_000_000)).slice(1).map((r) => r[0]);
+  expect(narrow.some((n) => n.includes('…'))).toBe(true);
+  // 名字格永远不超过「列数 - 尾巴预留」
+  for (const cols of [78, 60, 40, 24]) {
+    for (const r of cells(modelTable(ALL, null, cols, 1_000_000)).slice(1)) {
+      expect(r[0].length).toBeLessThanOrEqual(Math.max(10, cols - 14));
+    }
+  }
 });
 
 test('modelTable 行数受 limit 约束，并如实说还有多少没显示', () => {
   const rows = cells(modelTable(ALL, null, 78, 1_000_000, 2));
-  // 标题 + 列头 + 2 个模型 + 其余提示
-  expect(rows.length).toBe(5);
-  expect(rows[4][0]).toContain('其余 1 个');
-  expect(rows[4][0]).toContain('/quota models');
+  // 标题 + 2 个模型 + 其余提示
+  expect(rows.length).toBe(4);
+  expect(rows[3][0]).toContain('其余 1 个');
+  expect(rows[3][0]).toContain('/quota models');
 });
 
 test('没有目录时整段不出现 —— 拿不到官方表不该让面板少别的东西', () => {
@@ -304,8 +317,8 @@ test('layoutPane 带上目录才长出那一段，不带就一个字都不多', 
     rows.map((r) => (r.kind === 'gap' ? '' : r.segs.map((s) => s.text ?? '').join(''))).join(NL);
   const without = flat(layoutPane(v, pace, tier, 78, NOWFIX, false, null));
   const withCat = flat(layoutPane(v, pace, tier, 78, NOWFIX, false, null, { catalog: ALL, diff: NEW_ONLY }));
-  expect(without).not.toContain('模型次数');
-  expect(withCat).toContain('模型次数');
+  expect(without).not.toContain('每月可调用次数');
+  expect(withCat).toContain('每月可调用次数');
   expect(withCat).toContain('Qwen 4.0 Turbo');
 });
 
@@ -317,7 +330,73 @@ test('模型表里出现的颜色也必须过引擎那一关', () => {
   const bad = [];
   for (const r of rows) for (const seg of r) if (seg.color && !COLOR_RE.test(seg.color)) bad.push(seg.color);
   expect(bad).toEqual([]);
-  // 变动列确实带了颜色（否则这条测试是空转的）
+  // 标记确实带了颜色（否则这条测试是空转的）
   const colored = rows.flat().filter((s) => s.color);
   expect(colored.length).toBeGreaterThan(0);
+});
+
+// ────────────────────────────────────────────────────────────
+// 面板整体的信息架构（结论在最上、分组、降级）
+// ────────────────────────────────────────────────────────────
+
+const paneLines = (v, cols, extra) => {
+  const pace = computePace(v, NOWFIX);
+  const tier = tierOf(v, pace);
+  return layoutPane(v, pace, tier, cols, NOWFIX, false, null, extra)
+    .map((r) => (r.kind === 'gap' ? '' : r.segs.map((s) => s.text ?? '').join('')))
+    .map((s) => s.trimEnd());
+};
+
+test('面板第一行是结论：档位 + 什么时候断粮 / 能不能撑到周期末', () => {
+  const lines = paneLines(CAT_VIEW(), 78);
+  const head = lines[0];
+  // 档位词永远在最前面，且这一行必须给出"什么时候用完"这个结论
+  expect(/^(宽裕|偏紧|吃紧|断粮|采样中)/.test(head)).toBe(true);
+  expect(head).toMatch(/断粮|撑得到周期末|样本不足|额度已用完/);
+});
+
+test('面板第二行是「周期末预计」——该不该紧张的第二问', () => {
+  const lines = paneLines(CAT_VIEW(), 78);
+  expect(lines[1]).toContain('周期末预计');
+  expect(lines[1]).toMatch(/会超|富余/);
+});
+
+test('旧的「断粮」行不再出现第二遍 —— 同一件事只说一次', () => {
+  const lines = paneLines(CAT_VIEW(), 78);
+  const withJie = lines.filter((l) => l.startsWith('断粮'));
+  // 第一行里可以有「断粮」这个词（那是结论），但不该再有一条以「断粮」开头的独立行
+  expect(withJie.length).toBe(0);
+});
+
+test('「周期进度」和「安全线」是常驻的 —— 不用先试算一次才看得到', () => {
+  const lines = paneLines(CAT_VIEW(), 78);
+  const joined = lines.join(NL);
+  expect(joined).toContain('周期已过');
+  expect(joined).toContain('额度已用');
+  expect(joined).toContain('每天 ≤ ');
+  expect(joined).toContain('就不会超');
+});
+
+test('面板被分成有层次的几块：结论 → 额度 → 节奏 → 模型 → 工具，块间空行', () => {
+  const lines = paneLines(CAT_VIEW(), 78, { catalog: ALL, diff: NEW_ONLY });
+  const idx = (needle) => lines.findIndex((l) => l.includes(needle));
+  const iHead = 0;
+  const iMonth = idx('月');
+  const iProgress = idx('周期已过');
+  const iModels = idx('每月可调用次数');
+  const iTry = idx('试算');
+  expect(iMonth).toBeGreaterThan(iHead);
+  expect(iProgress).toBeGreaterThan(iMonth);
+  expect(iModels).toBeGreaterThan(iProgress);
+  expect(iTry).toBeGreaterThan(iModels);
+  // 块之间有空行（不是全部挤在一起）
+  expect(lines.filter((l) => l === '').length).toBeGreaterThanOrEqual(3);
+});
+
+test('窄到 40 列时结论行还在 —— 面板存在的理由不能被挤掉', () => {
+  for (const cols of [78, 60, 44, 40]) {
+    const head = paneLines(CAT_VIEW(), cols)[0];
+    expect(head.length).toBeGreaterThan(0);
+    expect(/^(宽裕|偏紧|吃紧|断粮|采样中)/.test(head)).toBe(true);
+  }
 });

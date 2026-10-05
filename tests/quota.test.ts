@@ -21,7 +21,9 @@ import {
   normalize,
   planInfo,
   projectWindow,
+  cycleProgress,
   quotaColor,
+  safeDailyBudget,
   tierOf,
 } from '../lib/quota.mjs';
 
@@ -460,8 +462,10 @@ test('面板含三个窗口、节奏预测与两个按钮', () => {
   expect(text).toContain('月');
   expect(text).toContain('5h');
   expect(text).toContain('周');
-  expect(text).toContain('本周期均速');
+  // 标签在重构里改过名：结论行现在也说「周期末预计」，均速那行省掉了「本周期」前缀
+  expect(text).toContain('均速');
   expect(text).toContain('周期末预计');
+  expect(text).toContain('安全线');
   expect(btns).toEqual(['refresh', 'copy']);
 });
 
@@ -622,4 +626,63 @@ test('meterParts 的落点段在会爆表时用 error，而不是写死的 ansi:
   const colors = allColors(over.parts);
   expect(colors.length).toBeGreaterThan(0);
   for (const c of colors) expect(COLOR_RE.test(c)).toBe(true);
+});
+
+// ────────────────────────────────────────────────────────────
+// 每天能花多少 / 周期进度
+// ────────────────────────────────────────────────────────────
+
+test('safeDailyBudget 把「会超」翻译成一个当天能执行的目标', () => {
+  // 剩 $19.29、还有 16 天 → 每天不超过 $1.21 就不会超
+  const now = Date.parse('2026-03-10T00:00:00.000Z');
+  const end = now + 16 * 86400000;
+  expect(Math.round(safeDailyBudget(19.29, end, now) * 100) / 100).toBe(1.21);
+});
+
+test('safeDailyBudget 剩不到一天时压到 1 天，不按半天摊（那会把目标抬成两倍）', () => {
+  const now = Date.parse('2026-03-10T00:00:00.000Z');
+  // 剩半天、剩 $10：按精确天数摊会得出「每天 ≤ $20」，读起来像"还能多花一倍"
+  expect(safeDailyBudget(10, now + 0.5 * 86400000, now)).toBe(10);
+  expect(safeDailyBudget(10, now + 2 * 3600000, now)).toBe(10);
+  // 超过一天才按天摊
+  expect(safeDailyBudget(10, now + 2 * 86400000, now)).toBe(5);
+});
+
+test('safeDailyBudget 在没余量 / 没有结束时刻时返回 null，不返回 0 或负数', () => {
+  const now = Date.parse('2026-03-10T00:00:00.000Z');
+  const end = now + 86400000;
+  expect(safeDailyBudget(0, end, now)).toBe(null);
+  expect(safeDailyBudget(-5, end, now)).toBe(null);
+  expect(safeDailyBudget(10, null, now)).toBe(null);
+  expect(safeDailyBudget(10, now - 1000, now)).toBe(null); // 周期已经结束了
+  expect(safeDailyBudget(NaN, end, now)).toBe(null);
+});
+
+test('cycleProgress 给出周期过了百分之几，且不依赖采样', () => {
+  const now = NOW;
+  const v = view(now);
+  const pace = computePace(v, now);
+  // 周期 3/1–3/31，now 是 3/15 → 约 45%
+  const pct = cycleProgress(pace);
+  expect(pct).toBeGreaterThan(40);
+  expect(pct).toBeLessThan(50);
+  // 采样中（样本不足）时依然给得出来 —— 它只跟时间有关
+  const early = NOW - 14 * 86400000 + 3600000;
+  const earlyPace = computePace(view(early), early);
+  expect(earlyPace.insufficient).toBe(true);
+  expect(cycleProgress(earlyPace)).toBeGreaterThanOrEqual(0);
+  expect(cycleProgress(null)).toBe(null);
+});
+
+test('周期进度是「额度用得快不快」的参照系 —— 80% vs 50% 才看得出超速', () => {
+  const v = view(NOW);
+  const pace = computePace(v, NOW);
+  const cycle = cycleProgress(pace);
+  const quota = v.monthly.percent;
+  // 这两个数并排才有意义：单看一个百分比没有参照。
+  // （这一条不判方向 —— 夹具里两者谁大谁小是夹具的事，不是函数的事。）
+  expect(typeof cycle).toBe('number');
+  expect(cycle).toBeGreaterThanOrEqual(0);
+  expect(cycle).toBeLessThanOrEqual(100);
+  expect(typeof quota).toBe('number');
 });
