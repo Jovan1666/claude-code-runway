@@ -633,10 +633,11 @@ test('meterParts 的落点段在会爆表时用 error，而不是写死的 ansi:
 // ────────────────────────────────────────────────────────────
 
 test('safeDailyBudget 把「会超」翻译成一个当天能执行的目标', () => {
-  // 剩 $19.29、还有 16 天 → 每天不超过 $1.21 就不会超
+  // 合成值：剩 $25、还有 20 天 → 每天不超过 $1.25 就不会超
+  // （⚠️ 别从真机上抄数 —— 这个仓库在这上面栽过三次，见 README 的隐私约束）
   const now = Date.parse('2026-03-10T00:00:00.000Z');
-  const end = now + 16 * 86400000;
-  expect(Math.round(safeDailyBudget(19.29, end, now) * 100) / 100).toBe(1.21);
+  const end = now + 20 * 86400000;
+  expect(safeDailyBudget(25, end, now)).toBe(1.25);
 });
 
 test('safeDailyBudget 剩不到一天时压到 1 天，不按半天摊（那会把目标抬成两倍）', () => {
