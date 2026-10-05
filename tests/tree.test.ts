@@ -14,7 +14,7 @@
 import { expect, test } from 'claude-code/testing';
 
 import { register } from '../hooks/register.mjs';
-import { normalize } from '../lib/quota.mjs';
+import { computePace, layoutPane, normalize, tierOf } from '../lib/quota.mjs';
 import { factorySet, validateTree } from '../tools/tree_lint.mjs';
 
 const DAY = 86_400_000;
@@ -182,6 +182,53 @@ test('pane 在四个宽度、8 个数据态、桌面与手机上产出的树都�
         }
         const reason = validateTree(tree, { surface });
         if (reason !== undefined) failures.push(`pane ${state}/${surface}/${cols} → ${reason}`);
+      }
+    }
+  }
+  expect(failures).toEqual([]);
+});
+
+// ── pane 的行宽：任何宽度下都不许有行超出可用列数 ──
+//
+// 这是补出来的一条：上面那条 pane 测试只跑 56/74/103/120 列，**全是宽面板**。
+// 而 `$.ui.open({ columns: 78 })` 只是"请求值" —— 窄窗口、用户 Ctrl+X 拖动之后
+// 都可能更窄，而面板的常态恰恰是**侧边栏**。实测 40 列时结论行（档位词 + 短语，
+// 两段都是 prio 0、丢不掉）按 43 格排，超出部分会被面板边缘直接裁掉。
+// 面板自己的下限是 `Math.max(30, …)`，所以从 30 列起都要立得住。
+test('pane 在任何宽度下每一行都不超宽（侧边栏优先）', () => {
+  const catalog = {
+    slug: 'goat',
+    planId: 'individual-goat',
+    fiveHourFraction: 0.3,
+    weeklyFraction: 0.6,
+    fetchedAt: NOW,
+    models: [
+      { name: 'DeepSeek V4 Flash (latest)', budgetUsd: 60, costPerRequest: 0.0004, monthly: 154000, fiveHour: 46200, weekly: 92400, hasTimeOfDay: false },
+      // 超长名字：名字列不该把整张表撑出面板
+      { name: 'A Name Long Enough To Overrun The Column If Measured Wrong', budgetUsd: 70, costPerRequest: 0.002, monthly: 35000, fiveHour: 10500, weekly: 21000, hasTimeOfDay: true },
+    ],
+  };
+  const diff = { added: new Set<string>(), repriced: new Set<string>() };
+
+  const failures: string[] = [];
+  for (const state of STATES) {
+    const v = normalize(rawFor(state), { now: NOW });
+    const pace = computePace(v, NOW);
+    const tier = tierOf(v, pace);
+    for (const cols of [30, 31, 32, 34, 40, 46, 50, 58, 74, 103, 120]) {
+      for (const extra of [undefined, { catalog, diff }]) {
+        // whatIf: 没试算过 / 试算成功 / 填了非法值 —— 三条分支都要量
+        for (const whatIf of [null, 3, 0]) {
+          for (const r of layoutPane(v, pace, tier, cols, NOW, state === 'stale', whatIf, extra)) {
+            if (r.kind !== 'row') continue;
+            const w = r.segs.reduce((a, s) => a + s.width, 0);
+            if (w > cols) {
+              failures.push(
+                `${state} / ${cols} 列 / catalog=${Boolean(extra)} / whatIf=${whatIf} → ${w} > ${cols}`,
+              );
+            }
+          }
+        }
       }
     }
   }

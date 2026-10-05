@@ -28,6 +28,7 @@ import {
   snapshotText,
   tierOf,
 } from '../lib/quota.mjs';
+import { buildCatalog, catalogAge, catalogDiff, catalogUrl, parsePlanEstimates } from '../lib/catalog.mjs';
 
 const API_BASE = 'https://api.commandcode.ai';
 const CONFIG_PATHS = [
@@ -73,6 +74,9 @@ async function getJson(url, headers) {
 const segText = (s) => {
   if (s.kind === 'button') return s.hotkey + ' ' + s.label;
   if (s.kind === 'meter') return s.parts.map((p) => p.text).join('');
+  // 输入框（试算）以前落到 `return s.text`，而它没有 text —— 于是预览里
+  // 「试算」后面是一片空白，看着像那行坏了。
+  if (s.kind === 'input') return '[' + s.label + s.placeholder + ' ▸' + s.submitLabel + ']';
   return s.text;
 };
 
@@ -116,13 +120,39 @@ async function main() {
   const pace = computePace(v, now);
   const tier = tierOf(v, pace);
 
+  // 模型次数目录 —— 跟 mod 一样抓公开文档页的 RSC 流。
+  // 以前预览不抓，`layoutPane` 拿不到 `catalog`，于是**那张模型表在这份预览里
+  // 根本不出现**：自检工具恰好绕开了用户最关心的一块。
+  let catalog = null;
+  let catDiff = null;
+  const planId = subs && subs.data && subs.data.planId;
+  const docUrl = catalogUrl(planId);
+  if (docUrl) {
+    try {
+      const res = await fetch(docUrl, {
+        headers: { RSC: '1', 'User-Agent': 'runway-preview/0.1.0' },
+      });
+      if (res.ok) {
+        catalog = buildCatalog(parsePlanEstimates(await res.text()), planId, Date.now());
+        catDiff = catalogDiff(null, catalog);
+      }
+    } catch {
+      // 抓不到就不画那块 —— 和真机上目录为空时一样
+    }
+  }
+  console.log(
+    `模型表 ${catalog ? catalog.models.length + ' 个 · 官方 ' + catalogAge(catalog, Date.now()) : '（没抓到，面板里不显示）'}`,
+  );
+
   console.log('');
   console.log('──── 输入框上方的额度条 ────');
   console.log('');
   for (const cols of [160, 120, 90, 80, 73, 70, 62, 58, 50, 40, 30, 26]) {
     const segs = layoutRow(v, pace, tier, cols, now, false);
     const line = segs.map(segText).join('  ');
-    const gone = ['foot', 'fivebar', 'weekbar', 'monbar'].filter(
+    // band 里还存在的可丢段：会员名 + 三根条。以前这里列着一个 `foot`，
+    // 而 `foot` 早就不存在了 —— 于是每行都假报「已丢 foot」。
+    const gone = ['plan', 'fivebar', 'weekbar', 'monbar'].filter(
       (id) => !segs.some((s) => s.id === id),
     );
     console.log(String(cols).padStart(3) + ' 列 │ ' + line);
@@ -131,9 +161,21 @@ async function main() {
 
   console.log('');
   console.log('──── 详情面板（按 1 打开）────');
-  console.log('');
-  for (const r of layoutPane(v, pace, tier, 58, now, false)) {
-    console.log(r.kind === 'gap' ? '' : '  ' + r.segs.map(segText).join(''));
+  // 两个宽度都打：面板的 `columns: 78` 只是**请求值**，窄窗口 / 用户拖动之后
+  // 实际可能窄得多，而侧边栏才是常态 —— 所以窄的那个也要看。
+  for (const cols of [58, 40]) {
+    console.log('');
+    console.log('  ── ' + cols + ' 列' + (cols === 40 ? '（很窄）' : '（侧边栏常见）') + ' ──');
+    console.log('');
+    for (const r of layoutPane(v, pace, tier, cols, now, false, null, { catalog, diff: catDiff })) {
+      if (r.kind === 'gap') {
+        console.log('');
+        continue;
+      }
+      const line = r.segs.map(segText).join('');
+      const w = r.segs.reduce((a, s) => a + s.width, 0);
+      console.log('  ' + line + (w > cols ? '   ⚠ 超宽 ' + w + ' > ' + cols : ''));
+    }
   }
 
   console.log('');
