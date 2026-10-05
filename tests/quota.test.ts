@@ -141,46 +141,46 @@ test('tierOf 按"还能撑多久"分档，余量为零时直接断粮', () => {
 // ────────────────────────────────────────────────────────────
 
 test('levelColor 按填充率分三档', () => {
-  expect(levelColor(0)).toBe('ansi:green');
-  expect(levelColor(59)).toBe('ansi:green');
-  expect(levelColor(60)).toBe('ansi:yellow');
-  expect(levelColor(84)).toBe('ansi:yellow');
-  expect(levelColor(85)).toBe('ansi:red');
-  expect(levelColor(120)).toBe('ansi:red');
+  expect(levelColor(0)).toBe('success');
+  expect(levelColor(59)).toBe('success');
+  expect(levelColor(60)).toBe('warning');
+  expect(levelColor(84)).toBe('warning');
+  expect(levelColor(85)).toBe('error');
+  expect(levelColor(120)).toBe('error');
 });
 
 test('quotaColor 听节奏而不是只听填充率', () => {
   // 填充率 40% 看着安全，但会提前烧完 —— 画成绿色就是骗人。
   // 第三个参数是「还能撑几天」，不是「缺口几天」。
-  expect(quotaColor(40, false, null)).toBe('ansi:green');
-  expect(quotaColor(40, true, 6)).toBe('ansi:yellow');
-  expect(quotaColor(40, true, 2)).toBe('ansi:red');
+  expect(quotaColor(40, false, null)).toBe('success');
+  expect(quotaColor(40, true, 6)).toBe('warning');
+  expect(quotaColor(40, true, 2)).toBe('error');
 });
 
 test('条全程只用 █ 一种字符，靠颜色区分（混用 ▒ / ░ 会高矮不齐）', () => {
   for (const [u, p] of [[40, 68], [58, 122], [5, null], [100, 100]]) {
-    const parts = landingParts(u, p, 12, 'ansi:green').parts;
+    const parts = landingParts(u, p, 12, 'success').parts;
     for (const part of parts) {
       expect(/^█+$/.test(part.text)).toBe(true);
     }
   }
 });
 
-test('条的颜色必须写成 ansi: 前缀，裸色名会被引擎当主题键丢掉', () => {
-  // color 是裸 string、没有枚举：引擎只在 rgb( / # / ansi256( / ansi: 开头时原样用，
-  // 否则当主题键查表，查不到返回 undefined —— 不报错、不抛异常，只是**完全没有颜色**。
-  // 主题里有 success/warning/error/rate_limit_empty，没有 green/yellow/red，
-  // 所以以前整根条是一点颜色都没有的。
+test('条的颜色用主题令牌，字符集必须过引擎那一关', () => {
+  // 引擎只认这个字符集：/^[#a-zA-Z0-9_().,% -]{1,40}$/
+  // **冒号不在里面** —— 所以 `ansi:red` 这种写法会让整棵树被判不合法、整条 band 消失。
+  // （这条测试以前是反的：它断言必须写 `ansi:` 前缀。那个断言当时就已经错了。）
   for (const pct of [10, 70, 95]) {
     for (const p of meterParts(pct, 10, levelColor(pct))) {
-      if (p.color) expect(p.color).toMatch(/^ansi:(green|yellow|red)$/);
+      if (p.color) expect(COLOR_RE.test(p.color)).toBe(true);
     }
   }
+  expect(meterParts(95, 10, levelColor(95)).some((p) => p.color === 'error')).toBe(true);
 });
 
 test('条在灰阶下也读得出分界：已用段加粗，落点段不加粗', () => {
   // 三段同字符 █、唯一区别是颜色时，颜色一丢就完全读不出"到哪为止是已花"。
-  const { parts } = landingParts(40, 68, 10, 'ansi:green');
+  const { parts } = landingParts(40, 68, 10, 'success');
   expect(parts[0].bold).toBe(true); // 已用
   expect(parts[1].bold).toBe(false); // 还将用掉
 });
@@ -190,18 +190,18 @@ test('条在灰阶下也读得出分界：已用段加粗，落点段不加粗',
 // ────────────────────────────────────────────────────────────
 
 test('条用块字符画：已用是实心，空槽是暗的，总宽不变', () => {
-  const parts = meterParts(50, 10, 'ansi:green');
+  const parts = meterParts(50, 10, 'success');
   const total = parts.reduce((a, p) => a + p.text.length, 0);
   expect(total).toBe(10);
   expect(parts[0].text).toBe('█'.repeat(5));
-  expect(parts[0].color).toBe('ansi:green');
+  expect(parts[0].color).toBe('success');
   expect(parts[1].text).toBe('█'.repeat(5)); // 空槽也是 █，只是暗的 —— 字形一致才对得齐
   expect(parts[1].dim).toBe(true);
 });
 
 test('条在极小填充率下也至少给一格，否则 3% 和 0% 分不出来', () => {
-  expect(meterParts(0, 10, 'ansi:green').length).toBe(1); // 只有空槽
-  const tiny = meterParts(1, 10, 'ansi:green');
+  expect(meterParts(0, 10, 'success').length).toBe(1); // 只有空槽
+  const tiny = meterParts(1, 10, 'success');
   expect(tiny[0].text).toBe('█');
   expect(tiny[0].text.length).toBe(1);
 });
@@ -243,22 +243,41 @@ test('有数据时任何宽度都画得出东西，且永不超宽', () => {
   expect(layout(160).segs.map((s) => s.id)).toContain('detail');
 });
 
-test('挤不下时先丢落点结论、再丢条，但三个窗口的百分比永远留着', () => {
+test('挤不下时先丢条、再丢档位词，但三个窗口的百分比永远留着', () => {
   const v = view5h();
-  const wide = ids(160, v);
-  expect(wide).toContain('foot');
+  const wide = ids(120, v);
+  expect(wide).toContain('tier');
   expect(wide).toContain('monbar');
 
-  const narrow = ids(50, v);
-  expect(narrow).not.toContain('foot');
+  // 60 列：条放不下 → 条让位，**档位词留下**（它是这一行唯一的结论）
+  const mid = ids(60, v);
+  expect(mid).not.toContain('monbar');
+  expect(mid).toContain('tier');
+  expect(mid).toContain('fivel');
+  expect(mid).toContain('weekl');
+  expect(mid).toContain('monl');
+
+  // 40 列：连档位词也塞不下，才轮到它让位 —— 但三个窗口一个都不能少
+  const narrow = ids(40, v);
+  expect(narrow).not.toContain('tier');
   expect(narrow).not.toContain('monbar');
-  // 但三个窗口都还在 —— 这正是之前被挤没的东西
   expect(narrow).toContain('fivel');
   expect(narrow).toContain('weekl');
   expect(narrow).toContain('monl');
   expect(narrow).toContain('fivep');
   expect(narrow).toContain('weekp');
   expect(narrow).toContain('monp');
+});
+
+test('band 上不出现「超了多少钱」—— 没有行动价值的数字不上屏', () => {
+  // 用户原话："超了我又能怎么样？我用完了就是用完了呀。"
+  // 想知道超多少就按 1 看明细，那里有金额和断粮时刻。
+  const v = view5h();
+  for (const cols of [160, 120, 90, 70, 60, 40, 30, 20]) {
+    const text = layout(cols, v).segs.map((s) => s.text ?? '').join(' ');
+    expect(text.includes('超 $')).toBe(false);
+    expect(text).not.toContain('安全'); // 同一处旧文案
+  }
 });
 
 test('三条宽度相同、一起伸缩 —— 不会有一条独大挤掉别人', () => {
@@ -286,28 +305,28 @@ test('三条宽度相同、一起伸缩 —— 不会有一条独大挤掉别人
 
 test('落点条：实心=已用，斜纹=还将用掉，余量格=会剩下的', () => {
   // 用了 40%，预计走到 68% —— 三区齐全
-  const { parts, over } = landingParts(40, 68, 10, 'ansi:green');
+  const { parts, over } = landingParts(40, 68, 10, 'success');
   expect(over).toBe(false);
   expect(parts[0].text).toBe('████'); // 40% × 10 格
-  expect(parts[0].color).toBe('ansi:green');
+  expect(parts[0].color).toBe('success');
   expect(parts[1].text).toBe('███'); // 4 → 7
-  expect(parts[1].color).toBe('ansi:green');
+  expect(parts[1].color).toBe('success');
   expect(parts[2].text).toBe('███');
   expect(parts[2].dim).toBe(true);
 });
 
 test('落点条：会冲过上限时余量格消失，斜纹整段变红', () => {
-  const { parts, over } = landingParts(40, 121, 10, 'ansi:green');
+  const { parts, over } = landingParts(40, 121, 10, 'success');
   expect(over).toBe(true);
   // 没有余量格 —— 这是"会满出来"最直接的形状
   expect(parts.some((p) => p.dim)).toBe(false);
   // 落点那一段是红的
   const landed = parts.filter((p) => !p.dim);
-  expect(landed[landed.length - 1].color).toBe('ansi:red');
+  expect(landed[landed.length - 1].color).toBe('error');
 });
 
 test('落点条：算不出落点时退化成普通水平条', () => {
-  const { parts, over } = landingParts(40, null, 10, 'ansi:green');
+  const { parts, over } = landingParts(40, null, 10, 'success');
   expect(over).toBe(false);
   expect(parts.filter((p) => !p.dim).length).toBe(1);
   expect(parts.some((p) => p.dim)).toBe(true);
@@ -316,7 +335,7 @@ test('落点条：算不出落点时退化成普通水平条', () => {
 test('落点条的总宽恒等于给定格数', () => {
   for (const [u, p] of [[0, null], [5, 5], [40, 68], [57, 122], [100, 100], [99, 300]]) {
     for (const n of [6, 12, 30]) {
-      const total = landingParts(u, p, n, 'ansi:green').parts.reduce((a, x) => a + x.text.length, 0);
+      const total = landingParts(u, p, n, 'success').parts.reduce((a, x) => a + x.text.length, 0);
       expect(total).toBe(n);
     }
   }
@@ -391,8 +410,9 @@ test('每一段都带完整形状，渲染器不必兜底', () => {
     expect(typeof s.width).toBe('number');
     if (s.kind === 'text') {
       expect(typeof s.text).toBe('string');
-      // 前景色只能是原始 ANSI 名或主题令牌，不能是 hex（写错整行消失）
-      if (s.color) expect(['ansi:green', 'ansi:yellow', 'ansi:red', 'success', 'warning', 'error']).toContain(s.color);
+      // 前景色只用主题令牌 success / warning / error（引擎的字符集不允许冒号，
+      // 所以既不能写 ansi: 前缀，也不该写死 hex —— hex 不跟明暗主题走）
+      if (s.color) expect(['success', 'warning', 'error']).toContain(s.color);
     }
     if (s.kind === 'meter') expect(Array.isArray(s.parts)).toBe(true);
     if (s.kind === 'button') {
@@ -533,4 +553,73 @@ test('register 只注册预期的事件，band 与面板各一个渲染钩子', 
     'ui.render',
     'session.end',
   ]);
+});
+
+// ────────────────────────────────────────────────────────────
+// 颜色：写错一处，整条 band 消失
+//
+// 引擎对 color / backgroundColor / borderColor 只做一次检查：
+//   typeof t === 'string' && /^[#a-zA-Z0-9_().,% -]{1,40}$/.test(t)
+// 不过就判**整棵 ui.render 树**不合法，整棵丢掉、改画引擎自己的（= 空白）。
+// 屏幕上没有任何提示，只在日志里留一句 "a hook returned a tree that does not validate"。
+//
+// 曾经这里返回 'error' —— **冒号不在那个字符集里**，于是三块内容一起消失。
+// 这两条测试就是那次事故的复现，别再删。
+// ────────────────────────────────────────────────────────────
+
+const COLOR_RE = /^[#a-zA-Z0-9_().,% -]{1,40}$/;
+
+// 把一棵渲染结果里所有 color / bg 取出来（含 meter 的各个分段）
+const allColors = (node: any, out: string[] = []): string[] => {
+  if (Array.isArray(node)) {
+    for (const x of node) allColors(x, out);
+    return out;
+  }
+  if (!node || typeof node !== 'object') return out;
+  for (const [k, v] of Object.entries(node)) {
+    if ((k === 'color' || k === 'bg') && typeof v === 'string') out.push(v);
+    else if (typeof v === 'object') allColors(v, out);
+  }
+  return out;
+};
+
+test('levelColor / quotaColor 只给主题令牌，不给 ansi: 前缀', () => {
+  // 'error' 这种写法过不了引擎的字符集，会让整棵树被判不合法
+  for (const pct of [0, 10, 59, 60, 84, 85, 100, 999]) {
+    for (const c of [levelColor(pct), quotaColor(pct, false, 30), quotaColor(pct, true, 1), quotaColor(pct, true, 9)]) {
+      expect(COLOR_RE.test(c)).toBe(true);
+      expect(c.includes(':')).toBe(false); // 冒号 = 必然失败，单独钉一遍
+    }
+  }
+  expect(levelColor(90)).toBe('error');
+  expect(levelColor(70)).toBe('warning');
+  expect(levelColor(10)).toBe('success');
+});
+
+test('band 与面板在任何宽度下产出的颜色都合法', () => {
+  const cases: Array<[string, any]> = [];
+  for (let cols = 20; cols <= 140; cols += 3) {
+    for (const v of [view(), view5h()]) {
+      const pace = computePace(v, NOW);
+      cases.push([`layoutRow(${cols})`, layoutRow(v, pace, tierOf(v, pace), cols, NOW, false)]);
+      cases.push([`layoutPane(${cols})`, layoutPane(v, pace, tierOf(v, pace), cols, NOW, false)]);
+      cases.push([`layoutPane(${cols}, whatIf)`, layoutPane(v, pace, tierOf(v, pace), cols, NOW, false, '50')]);
+    }
+  }
+  // 陈旧读数会走另一条取色分支（颜色被抹成 null），一并覆盖
+  cases.push(['layoutRow(stale)', layoutRow(view(), computePace(view(), NOW), tierOf(view(), computePace(view(), NOW)), 100, NOW, true)]);
+
+  const bad: string[] = [];
+  for (const [label, segs] of cases) {
+    for (const c of allColors(segs)) if (!COLOR_RE.test(c)) bad.push(`${label}: ${JSON.stringify(c)}`);
+  }
+  expect(bad).toEqual([]);
+});
+
+test('meterParts 的落点段在会爆表时用 error，而不是写死的 ansi:red', () => {
+  const over = landingParts(60, 130, 20, 'success');
+  expect(over.over).toBe(true);
+  const colors = allColors(over.parts);
+  expect(colors.length).toBeGreaterThan(0);
+  for (const c of colors) expect(COLOR_RE.test(c)).toBe(true);
 });
