@@ -245,23 +245,23 @@ test('有数据时任何宽度都画得出东西，且永不超宽', () => {
   expect(layout(160).segs.map((s) => s.id)).toContain('detail');
 });
 
-test('挤不下时先丢条、再丢档位词，但三个窗口的百分比永远留着', () => {
+test('挤不下时先丢条、再丢会员名，但三个窗口的百分比永远留着', () => {
   const v = view5h();
   const wide = ids(120, v);
-  expect(wide).toContain('tier');
+  expect(wide).toContain('plan');
   expect(wide).toContain('monbar');
 
-  // 60 列：条放不下 → 条让位，**档位词留下**（它是这一行唯一的结论）
+  // 60 列：条放不下 → 条让位，**会员名留下**
   const mid = ids(60, v);
   expect(mid).not.toContain('monbar');
-  expect(mid).toContain('tier');
+  expect(mid).toContain('plan');
   expect(mid).toContain('fivel');
   expect(mid).toContain('weekl');
   expect(mid).toContain('monl');
 
-  // 40 列：连档位词也塞不下，才轮到它让位 —— 但三个窗口一个都不能少
+  // 40 列：连会员名也塞不下，才轮到它让位 —— 但三个窗口一个都不能少
   const narrow = ids(40, v);
-  expect(narrow).not.toContain('tier');
+  expect(narrow).not.toContain('plan');
   expect(narrow).not.toContain('monbar');
   expect(narrow).toContain('fivel');
   expect(narrow).toContain('weekl');
@@ -686,4 +686,23 @@ test('周期进度是「额度用得快不快」的参照系 —— 80% vs 50% �
   expect(cycle).toBeGreaterThanOrEqual(0);
   expect(cycle).toBeLessThanOrEqual(100);
   expect(typeof quota).toBe('number');
+});
+
+test('band 开头是会员名，不是档位词', () => {
+  // 用户原话："这偏紧两个字放在这毫无意义……或者你说啊，我们这是 goat 的会员"。
+  // 会员名是他花钱买的那一档；档位靠**颜色**表达（颜色仍然跟着档位走）。
+  const v = view5h();
+  const segs = layout(120, v).segs;
+  const first = segs[0];
+  expect(first.id).toBe('plan');
+  expect(first.text).toBe('GOAT');
+  // 颜色仍然跟着档位 —— 红色会员名 = 有问题，这个信号不能丢
+  expect(['success', 'warning', 'error']).toContain(first.color);
+});
+
+test('拿不到会员名时退回档位词，而不是空着', () => {
+  const v = view5h();
+  v.plan.name = '';
+  const first = layout(120, v).segs[0];
+  expect(['宽裕', '偏紧', '吃紧', '断粮', '采样中']).toContain(first.text);
 });
