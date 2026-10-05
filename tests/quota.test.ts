@@ -210,21 +210,37 @@ test('条在极小填充率下也至少给一格，否则 3% 和 0% 分不出来
 // 布局
 // ────────────────────────────────────────────────────────────
 
-test('三个窗口要么一起完整出现，要么整行不画（不再交回超宽内容）', () => {
+test('有数据时任何宽度都画得出东西，且永不超宽', () => {
   // 用户的原话："只能看到5小时的限额看不到周限额"
-  for (const cols of [200, 160, 120, 90, 70, 58, 50, 46, 40, 26, 10]) {
+  // 另一半是从反面踩出来的：放不下就整行不画，会让这一行**完全空白** ——
+  // 而空白和「mod 没装」长得一模一样，用户在 Desktop Code tab 上（band 比终端窄）
+  // 看到的就是一片空白，根本分不清是放不下还是没装。所以有数据就必须画点什么。
+  for (const cols of [200, 160, 120, 90, 70, 58, 50, 46, 40, 26, 10, 6]) {
     const segs = layout(cols).segs;
-    if (!segs.length) continue; // 装不下就整行不画 —— 好过折行把最右边的「月」切掉
+    expect(segs.length).toBeGreaterThan(0);
     const width = segs.reduce((a, s) => a + s.width, 0) + 2 * (segs.length - 1);
     expect(width).toBeLessThanOrEqual(cols);
-    for (const id of ['fivel', 'weekl', 'monl', 'detail']) {
-      expect(segs.map((s) => s.id)).toContain(id);
+
+    const ids = segs.map((s) => s.id);
+    if (ids.includes('fivel')) {
+      // 画得出三个窗口时，三个必须都在 —— 谁也不会把谁挤没
+      for (const id of ['fivel', 'weekl', 'monl']) {
+        expect(ids).toContain(id);
+      }
+    } else {
+      // 实在放不下才退化成只报主窗口
+      expect(ids).toEqual(['monp']);
     }
   }
-  // 常见宽度下必须画得出来（不能因为修了溢出就把这一行整个弄没）
+  // 常见宽度下要画得完整（不能因为修了溢出就把内容整个砍掉）
   for (const cols of [200, 160, 120, 90, 70, 58, 50]) {
-    expect(layout(cols).segs.length).toBeGreaterThan(0);
+    const ids = layout(cols).segs.map((s) => s.id);
+    expect(ids).toContain('fivel');
+    expect(ids).toContain('monl');
   }
+  // 详情入口可以丢，三个窗口的百分比不能
+  expect(layout(40).segs.map((s) => s.id)).not.toContain('detail');
+  expect(layout(160).segs.map((s) => s.id)).toContain('detail');
 });
 
 test('挤不下时先丢落点结论、再丢条，但三个窗口的百分比永远留着', () => {
