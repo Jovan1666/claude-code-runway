@@ -170,7 +170,7 @@ test('catalogAge 说人话，且过期会被看见', () => {
 
 const NL = String.fromCharCode(10);
 
-import { computePace, layoutPane, modelTable, modelTableText, normalize, tierOf } from '../lib/quota.mjs';
+import { computePace, dispWidth, layoutPane, modelTable, modelTableText, normalize, tierOf } from '../lib/quota.mjs';
 
 // 面板那一段测试要用一份真实形状的读数。
 //
@@ -213,28 +213,42 @@ test('modelTable 的标题说清口径、模型数和新鲜度', () => {
   expect(head).toContain('刚刚更新');
 });
 
-test('modelTable 一行一个模型：名字、次数、可选标记 —— 不排成列', () => {
+// 带框线的行：首字符是框线字形（数据行以 │ 开头，规则线以 ┌├└ 开头）
+const BOXCH = '\u250c\u251c\u2514\u2502'; // ┌ ├ └ │
+const isBoxRow = (r) => BOXCH.includes(line(r)[0]);
+const isRuleRow = (r) => /^[\u250c\u251c\u2514]/.test(line(r));
+const w = (r) => dispWidth(line(r));
+
+test('modelTable 画的是带框线的表：顶线、表头、分隔线、数据、底线', () => {
   const rows = modelTable(CAT, null, 78, 1_000_000);
-  // 标题之后第一行就是第一名
-  expect(line(rows[1])).toContain('DeepSeek V4.1 Flash');
-  expect(line(rows[1])).toContain('154,000');
-  expect(line(rows[1])).toContain('次/月');
-  // 表按每月次数降序 —— 每美元买到最多请求的排最前
-  expect(line(rows[1])).toContain('154,000');
-  expect(line(rows[2])).toContain('2,070');
+  const L = rows.map(line);
+  expect(L[1].startsWith('\u250c\u2500')).toBe(true); // ┌─
+  expect(L[1].endsWith('\u2510')).toBe(true); // ┐
+  expect(L[2]).toContain('模型');
+  expect(L[2]).toContain('每月调用');
+  expect(L[3].startsWith('\u251c\u2500')).toBe(true); // ├─
+  // 底线不一定在倒数第二行（后面可能还有一条「其余 N 个」的脚注），所以按特征找
+  expect(L.some((l) => l.startsWith('└─') && l.endsWith('┘'))).toBe(true); // └─…┘
+  expect(L[4]).toContain('DeepSeek V4.1 Flash');
+  expect(L[4]).toContain('154,000');
 });
 
-test('modelTable 不依赖任何对齐机制 —— 没有列宽、没有靠空格撑宽度', () => {
-  // 这一条是那两次"列全塌在一起"的护栏。
-  // 面板里空格会被吃掉、定宽 Box 会被压回内容宽，两种机制都赌不得，
-  // 所以这块内容**根本不需要对齐**：名次就是信息，横向比数字交给 /quota models。
-  const rows = modelTable(ALL, NEW_ONLY, 90, 1_000_000);
-  for (const r of rows) {
-    for (const seg of r) {
-      expect(seg.width).toBe(undefined);
-      expect(seg.align).toBe(undefined);
-      expect(seg.text.includes('  ')).toBe(false); // 连续空格 = 在偷偷补宽度
-    }
+test('带框线的每一行**等宽** —— 这是这张表唯一真正的不变式', () => {
+  // 框线表散架的样子就是"某一行比别的宽一格"，竖线就错位了。
+  for (const cols of [78, 66, 56, 40]) {
+    const rows = modelTable(ALL, NEW_ONLY, cols, 1_000_000).filter(isBoxRow);
+    expect(rows.length).toBeGreaterThan(4);
+    const widths = new Set(rows.map(w));
+    expect(widths.size).toBe(1);
+    expect([...widths][0]).toBeLessThanOrEqual(cols - 1);
+  }
+});
+
+test('modelTable 每个段都是 prio 0 —— 否则 fitSegments 会把表拆散', () => {
+  // layoutPane 逐段裁剪：只要有一个段 prio > 0，超宽时它会被单独丢掉，
+  // 于是表里少一根竖线或一整列。宽度已经算好保证放得下，所以不该有可丢的段。
+  for (const r of modelTable(ALL, NEW_ONLY, 66, 1_000_000)) {
+    for (const seg of r) expect(seg.prio).toBe(0);
   }
 });
 
@@ -243,43 +257,40 @@ test('modelTable 把新增/改价的钉在最前面，标记单独一段带颜�
   const withNew = { name: 'Qwen 4.0 Turbo', budgetUsd: 20, rates: { inputCost: 0.1, outputCost: 0.2, cacheReadCost: 0.001 }, shape: { inputTokens: 800, outputTokens: 200, cacheReadTokens: 50000 } };
   const next = buildCatalog(parsePlanEstimates(page([SOL, cheaper, withNew])), 'individual-goat', 2);
   const rows = modelTable(next, catalogDiff(CAT, next), 78, 2);
-  // 0 标题 / 1、2 被钉住的两个（★新 在前、↑价 在后）
-  expect(line(rows[1])).toContain('Qwen 4.0 Turbo');
-  expect(rows[1][4].text.trim()).toBe('★新');
-  expect(rows[1][4].color).toBe('success');
-  expect(line(rows[2])).toContain('DeepSeek V4.1 Flash');
-  expect(rows[2][4].text.trim()).toBe('↑价');
-  expect(rows[2][4].color).toBe('warning');
-  // 名字本身不带颜色 —— 否则整张表看起来全是链接
-  expect(rows[1][0].color).toBeFalsy();
+  // 框行顺序：顶线 / 表头 / 分隔线 / 数据…/ 底线 —— 数据从下标 3 开始
+  const data = rows.filter(isBoxRow).slice(3, -1);
+  expect(line(data[0])).toContain('Qwen 4.0 Turbo');
+  expect(line(data[1])).toContain('DeepSeek V4.1 Flash');
+  // 标记必须是**独立的一段**且带颜色 —— 这样名字不会被染成绿的
+  const markSeg = (row) => row.find((s) => s.text.trim() === '★新' || s.text.trim() === '↑价');
+  const m0 = markSeg(data[0]);
+  expect(m0 && m0.text.trim()).toBe('★新');
+  expect(m0 && m0.color).toBe('success');
+  const m1 = markSeg(data[1]);
+  expect(m1 && m1.text.trim()).toBe('↑价');
+  expect(m1 && m1.color).toBe('warning');
+  expect(data[0][0].color).toBeFalsy(); // 名字那段不染色
 });
 
-test('modelTable 窄的时候截断名字，且尾巴留得下', () => {
-  // 40 列还装得下最长那个名字（25 格），所以不会截断
-  const wide = cells(modelTable(ALL, null, 40, 1_000_000)).slice(1).map((r) => r[0]);
-  expect(wide.every((n) => !n.includes('…'))).toBe(true);
-  // 24 列装不下了 → 截断
-  const narrow = cells(modelTable(ALL, null, 24, 1_000_000)).slice(1).map((r) => r[0]);
-  expect(narrow.some((n) => n.includes('…'))).toBe(true);
-  // 名字格永远不超过「列数 - 尾巴预留」
-  for (const cols of [78, 60, 40, 24]) {
-    for (const r of cells(modelTable(ALL, null, cols, 1_000_000)).slice(1)) {
-      expect(r[0].length).toBeLessThanOrEqual(Math.max(10, cols - 14));
-    }
-  }
+test('modelTable 窄的时候名字被截断，但表仍然等宽', () => {
+  const narrow = modelTable(ALL, null, 40, 1_000_000);
+  expect(narrow.map(line).some((l) => l.includes('…'))).toBe(true);
+  const box = narrow.filter(isBoxRow);
+  expect(new Set(box.map(w)).size).toBe(1);
+  expect(w(box[0])).toBeLessThanOrEqual(39);
 });
 
-test('modelTable 行数受 limit 约束，并如实说还有多少没显示', () => {
-  const rows = cells(modelTable(ALL, null, 78, 1_000_000, 2));
-  // 标题 + 2 个模型 + 其余提示
-  expect(rows.length).toBe(4);
-  expect(rows[3][0]).toContain('其余 1 个');
-  expect(rows[3][0]).toContain('/quota models');
+test('modelTable 太窄时退回纯列表 —— 不做框线，也不硬挤', () => {
+  const tiny = modelTable(ALL, null, 20, 1_000_000);
+  expect(tiny.filter(isRuleRow).length).toBe(0);
+  expect(tiny.map(line).join(' ')).toContain('DeepSeek');
 });
 
-test('没有目录时整段不出现 —— 拿不到官方表不该让面板少别的东西', () => {
-  expect(modelTable(null, null, 78, 1)).toEqual([]);
-  expect(modelTable({ models: [] }, null, 78, 1)).toEqual([]);
+test('modelTable 行数 = 模型数 + 4（顶线/表头/分隔线/底线），且随 limit 收敛', () => {
+  // 夹具只有 3 个模型
+  expect(modelTable(ALL, null, 78, 1_000_000).filter(isBoxRow).length).toBe(3 + 4);
+  expect(modelTable(ALL, null, 78, 1_000_000, 2).filter(isBoxRow).length).toBe(2 + 4);
+  expect(modelTable(ALL, null, 78, 1_000_000, 2).map(line).join(' ')).toContain('其余 1 个');
 });
 
 test('modelTableText 是 markdown 表格 —— 空格对齐在会话里会被吃掉', () => {
