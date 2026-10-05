@@ -260,6 +260,10 @@ claude plugin install runway@claude-code-runway --scope user
 
 ## 数据来源
 
+> **每一个显示出来的数字从哪来、多久更新一次、官方变了会怎样 —— 见
+> [docs/data-sources.md](docs/data-sources.md)。** 那张表把 live / derived / 写死的
+> 分得很清楚，也包括剩下的写死项和已知偏差。
+
 打 `api.commandcode.ai` 的三个端点：
 
 ```
