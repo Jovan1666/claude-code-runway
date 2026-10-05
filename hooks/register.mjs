@@ -52,6 +52,7 @@ let inflight = null;
 let inflightAt = 0;
 let lastTurnRefresh = 0;
 let lastErrorAt = 0; // 最近一次取数失败的时刻，手动刷新用它给回执
+let credFound = false; // 有没有找到凭据 —— 决定没读数时状态行写哪个原因
 let marks = { announcedCycle: null, announcedTier: null, sawDetail: false };
 let whatIf = null; // 试算输入的内容（纯本地计算，不发请求）
 const timers = [];
@@ -116,12 +117,14 @@ export function register(on) {
     // 后果是 band 永远按兜底的 80 列排版（宽屏浪费、窄屏溢出），
     // 而且问卷出现时不让位，两块内容叠在一起。
     // 这句在 try 之外，所以对 props 缺失也要免疫（缺了就当没有问卷）。
-    if (!snap || (e.props && e.props.hasSurvey)) return rest; // 有问卷时让位；没数据时不占位置
+    if (e.props && e.props.hasSurvey) return rest; // 有问卷时让位
     // 2.1.288 上，ui.render 抛错或交回坏树会让**整个会话**以
     // "unrecoverable interface error" 结束（2.1.289 才改成引擎自己兜底）。
     // 所以在自己这层就吞掉，画不出来就让位。
     try {
-      const row = renderRow($, e);
+      // 没读数时不再直接让位：那样"没装"和"装了但取不到数"长得一模一样，
+      // 只能靠猜该去查配置还是该去查网络。改画一行状态，把原因写在屏幕上。
+      const row = snap ? renderRow($, e) : renderStatus($, e);
       if (!row) return rest;
       if (!rest) return row;
       const { Box } = $.ui.resolve(e);
@@ -284,9 +287,11 @@ function refresh($) {
     try {
       const cred = await findCredential($);
       if (!cred) {
+        credFound = false;
         lastErrorAt = Date.now();
         return;
       }
+      credFound = true;
       const digest = fnv1a(cred.apiKey);
 
       const cached = readDoc(await $.store.get(CACHE_KEY));
@@ -401,6 +406,18 @@ function meterNode(Box, Text, key, parts) {
     key,
     flexDirection: 'row',
     children: parts.map((p, j) => textOf(Text, key + '-' + j, p)),
+  });
+}
+
+// 没有读数时画这一行，把原因写在屏幕上。
+// 「没装」和「装了但取不到数」在静默让位时长得一模一样 —— 用户只能靠猜。
+function renderStatus($, e) {
+  const { Box, Text } = $.ui.resolve(e);
+  const why = credFound ? '取数失败 · 接口或网络不可达' : '没找到 Command Code 凭据';
+  return Box({
+    flexDirection: 'row',
+    paddingX: 1,
+    children: [Text({ dimColor: true, children: `额度条 · ${why}` })],
   });
 }
 
