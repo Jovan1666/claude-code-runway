@@ -691,20 +691,14 @@ function renderPane($, e) {
         if (s.id === 'copy') props.autoFocus = true;
         return Button(props);
       }
-      // 带**显式对齐**的格子才包成定宽 Box。
+      // 注意：**不要**在这里靠 `s.width` 去包定宽 Box 做列对齐。
       //
-      // 这里原来是 `if (s.width)` —— 而 T() 给**每一段**都设了 width，
-      // 于是整个面板的每一段都被包进定宽 Box，把原来靠空格对齐的布局全打散了
-      // （模型表只是最明显的一处）。所以改成显式 opt-in：只有真的想要列宽的段才带 align。
-      if (s.align) {
-        return Box({
-          key: 'rw-' + s.id,
-          width: s.width,
-          flexDirection: 'row',
-          justifyContent: s.align === 'right' ? 'flex-end' : 'flex-start',
-          children: [textOf(Text, 'rw-' + s.id + 't', s)],
-        });
-      }
+      // 踩过：Box 的 `width` 是 flex-basis，而引擎给 Box 的默认值里有
+      // `flexShrink: 1` —— 主轴放不下时定宽会被一路压回内容宽，
+      // 于是"短名字那行的数字跑到左边去"。真要做固定列，三件事缺一不可：
+      //   width + minWidth 同值 + **flexShrink: 0**，并且**列宽之和 ≤ bodyColumns**
+      //   （关掉压缩后放不下就是溢出被裁，不会自己缩）。
+      // 但模型那块现在走的是"一行一个模型"，本来就不需要对齐，所以不引入这套机制。
       return textOf(Text, 'rw-' + s.id, s);
     });
     children.push(Box({ key: 'rw-pr' + i, flexDirection: 'row', children: kids.filter(Boolean) }));
