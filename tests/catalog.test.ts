@@ -9,6 +9,7 @@
 import { expect, test } from 'claude-code/testing';
 
 import {
+  GO_FRACTIONS,
   buildCatalog,
   catalogAge,
   catalogDiff,
@@ -98,14 +99,23 @@ test('表按每月次数降序 —— 每美元能买到最多请求的排最前
   expect(cat.models[1].name).toBe('GPT-5.6 Sol');
 });
 
-test('Go 改过代：老的 0.2/0.5，新的 0.3/0.6 —— 按 planId 覆盖页面系数', () => {
-  const raw = parsePlanEstimates(page([DEEPSEEK], 0.2, 0.5));
-  const v1 = buildCatalog(raw, 'individual-go-v1', 0);
-  expect(v1.fiveHourFraction).toBe(0.3);
-  expect(v1.weeklyFraction).toBe(0.6);
-  // 老代仍用页面的 0.2/0.5
-  const v0 = buildCatalog(raw, 'individual-go', 0);
-  expect(v0.fiveHourFraction).toBe(0.2);
+test('窗口系数以**页面**为准，不用写死的表覆盖', () => {
+  // 这条是踩出来的：曾经有一张写死的 GO_FRACTIONS（individual-go → 0.2/0.5），
+  // 理由是"页面只反映当前那一代"。实测 Go 页面此刻给的是 **0.3 / 0.6** ——
+  // 那张表把 live 值盖掉了，5h/周的可调用次数**比真值低三分之一**。
+  // 教训：不要拿假设去覆盖实测数据。
+  const raw = parsePlanEstimates(page([DEEPSEEK], 0.3, 0.6));
+  for (const planId of ['individual-go', 'individual-go-v1', 'individual-goat', 'individual-max']) {
+    const cat = buildCatalog(raw, planId, 0);
+    expect(cat.fiveHourFraction).toBe(0.3);
+    expect(cat.weeklyFraction).toBe(0.6);
+  }
+  // 页面给什么就用什么 —— 连"更保守"的换算都不做
+  const other = buildCatalog(parsePlanEstimates(page([DEEPSEEK], 0.25, 0.45)), 'individual-go', 0);
+  expect(other.fiveHourFraction).toBe(0.25);
+  expect(other.weeklyFraction).toBe(0.45);
+  // 覆盖表必须保持空的（留着它就会有下一个人重新填进去）
+  expect(Object.keys(GO_FRACTIONS)).toEqual([]);
 });
 
 test('单价为 0 的模型算不出次数，显示 Free 而不是 0', () => {
