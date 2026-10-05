@@ -53,6 +53,22 @@ let inflightAt = 0;
 let lastTurnRefresh = 0;
 let lastErrorAt = 0; // 最近一次取数失败的时刻，手动刷新用它给回执
 let credFound = false; // 有没有找到凭据 —— 决定没读数时状态行写哪个原因
+
+// ── 临时现场诊断 ──
+// band 在 Desktop Code tab 上不显示时，从仓库外面看不出是哪一环断了：
+// hook 没被调用？拿到了多宽？画出来了但渲染器吞了？抛错了？
+// 这里把答案写进 $.store（落盘在 ~/.claude/plugins/store/），外面直接读文件即可。
+// 定位完就删。
+const DIAG_KEY = 'runway.diag';
+const diag = { startedAt: null, credFound: null, renders: 0, last: null, error: null };
+
+function saveDiag($) {
+  try {
+    $.store.set(DIAG_KEY, diag).catch(() => {});
+  } catch {
+    /* 诊断本身不该影响任何事 */
+  }
+}
 let marks = { announcedCycle: null, announcedTier: null, sawDetail: false };
 let whatIf = null; // 试算输入的内容（纯本地计算，不发请求）
 const timers = [];
@@ -66,6 +82,9 @@ export function register(on) {
     const result = await next(e);
 
     await hydrate($); // 只读本地 store，快
+    diag.startedAt = Date.now();
+    diag.version = 'diag-1';
+    saveDiag($);
     refresh($); // 不 await：网络请求可能永久挂起（见文件末的说明）
 
     const stop = $.clock.every(TTL_MS, () => {
@@ -125,11 +144,25 @@ export function register(on) {
       // 没读数时不再直接让位：那样"没装"和"装了但取不到数"长得一模一样，
       // 只能靠猜该去查配置还是该去查网络。改画一行状态，把原因写在屏幕上。
       const row = snap ? renderRow($, e) : renderStatus($, e);
+      diag.renders += 1;
+      diag.last = {
+        at: Date.now(),
+        hasProps: Boolean(e.props),
+        bodyColumns: e.props?.bodyColumns ?? null,
+        hasSurvey: Boolean(e.props?.hasSurvey),
+        snap: Boolean(snap),
+        madeRow: Boolean(row),
+        hadRest: Boolean(rest),
+      };
+      if (diag.renders <= 30) saveDiag($);
       if (!row) return rest;
       if (!rest) return row;
       const { Box } = $.ui.resolve(e);
       return Box({ flexDirection: 'column', children: [rest, row] });
-    } catch {
+    } catch (err) {
+      diag.renders += 1;
+      diag.error = String((err && err.stack) || err);
+      saveDiag($);
       return rest;
     }
   });
@@ -434,6 +467,11 @@ function renderRow($, e) {
   const tier = tierOf(v, pace);
   const stale = now - snapAt > TTL_MS * 2;
   const segs = layoutRow(v, pace, tier, cols, now, stale);
+  diag.cols = cols;
+  diag.segs = segs.length;
+  diag.tier = tier.word;
+  diag.percent = Math.round(v.monthly.percent);
+  diag.paceOk = Boolean(pace && !pace.insufficient);
   if (!segs.length) return null;
 
   const children = [];
