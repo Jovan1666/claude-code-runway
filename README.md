@@ -249,6 +249,29 @@ Desktop 传不了命令行参数，所以用这个环境变量 —— 它就是�
 Windows 上多条路径用 `;` 分隔，其他平台用 `:`。撤销就是删掉这一行。
 用 `claude plugin list` 看 `runway@inline` 是否 `loaded`。
 
+### ⚠️ 「mod 突然全不见了」——一行命令就能恢复
+
+`~/.claude/settings.json` 是**多个写入方共用**的一个文件。桌面应用按它自己那份状态
+**整份覆盖**时，会把别人写进去的键一起抹掉：`enabledPlugins` 里的 mod 没了，
+`env.CLAUDE_CODE_PLUGIN_DIRS` 整个键消失 —— 表现就是**所有 mod 同时不显示**，
+而文件本身语法完全正确，看不出哪儿错了。（已实测过：`claude plugin validate` /
+`claude plugin test` **不会**写这个文件，所以不是它们干的。）
+
+恢复：
+
+```bash
+node tools/restore-settings.mjs            # 检查 + 补回（先自动备份）
+node tools/restore-settings.mjs --dry-run  # 只看要改什么
+```
+
+它**只碰那两个键**，其余原样保留；幂等，好的时候什么都不做；写完会复读一遍确认没被
+别的进程抢写。跑完**要重启应用**才会重新加载。
+
+> 更抗覆盖的通道：《mod 参考》里写明 `CLAUDE_CODE_PLUGIN_DIRS` 可以从**进程环境变量
+> 或** settings 的 `env` 块读取。设成用户级环境变量就不会被应用覆盖 —— 代价是它要
+> 重新登录（或重启资源管理器）才生效，而且**别和 settings 里那份同时存在**，
+> 否则同一个目录会被注册两次、画两遍。
+
 ### 从 marketplace 装
 
 把本仓库当作 marketplace 加进去：
