@@ -213,22 +213,26 @@ test('modelTable 的标题说清口径、模型数和新鲜度', () => {
   expect(head).toContain('刚刚更新');
 });
 
-// 带框线的行：首字符是框线字形（数据行以 │ 开头，规则线以 ┌├└ 开头）
-const BOXCH = '\u250c\u251c\u2514\u2502'; // ┌ ├ └ │
-const isBoxRow = (r) => BOXCH.includes(line(r)[0]);
-const isRuleRow = (r) => /^[\u250c\u251c\u2514]/.test(line(r));
+// 带框线的行：数据行以 `|` 开头，规则线以 `+` 开头。
+//
+// **框线只用 ASCII。** 第一版用的是 box-drawing（┌─┬┐│└┴┘），它们在 Unicode 里是
+// East Asian Ambiguous 宽度 —— 占一格还是两格**由字体决定**，中文环境下常被渲染成两格，
+// 于是横线比表格长一倍、整张表散架（用户截图报的正是这个）。
+// `+ - |` 是 ASCII（Na/N），任何字体下都是一格。这条断言把这个决定钉住。
+const isBoxRow = (r) => /^[|+]/.test(line(r));
+const isRuleRow = (r) => /^\+/.test(line(r));
 const w = (r) => dispWidth(line(r));
 
 test('modelTable 画的是带框线的表：顶线、表头、分隔线、数据、底线', () => {
   const rows = modelTable(CAT, null, 78, 1_000_000);
   const L = rows.map(line);
-  expect(L[1].startsWith('\u250c\u2500')).toBe(true); // ┌─
-  expect(L[1].endsWith('\u2510')).toBe(true); // ┐
+  expect(L[1].startsWith('+-')).toBe(true);
+  expect(L[1].endsWith('+')).toBe(true);
   expect(L[2]).toContain('模型');
   expect(L[2]).toContain('每月调用');
-  expect(L[3].startsWith('\u251c\u2500')).toBe(true); // ├─
-  // 底线不一定在倒数第二行（后面可能还有一条「其余 N 个」的脚注），所以按特征找
-  expect(L.some((l) => l.startsWith('└─') && l.endsWith('┘'))).toBe(true); // └─…┘
+  expect(L[3].startsWith('+-')).toBe(true);
+  // 三条规则线都长这样：+----+----+（ASCII 框线 —— 见下面那条断言）
+  expect(L.filter((l) => /^\+[+-]*\+$/.test(l)).length).toBe(3);
   expect(L[4]).toContain('DeepSeek V4.1 Flash');
   expect(L[4]).toContain('154,000');
 });
@@ -410,4 +414,11 @@ test('窄到 40 列时结论行还在 —— 面板存在的理由不能被挤�
     expect(head.length).toBeGreaterThan(0);
     expect(/^(宽裕|偏紧|吃紧|断粮|采样中)/.test(head)).toBe(true);
   }
+});
+
+test('框线只用 ASCII —— box-drawing 是 Ambiguous 宽度，字体说了算', () => {
+  // 这是那次"表格散架"的护栏：┌─│ 这些在中文环境下可能占两格，
+  // 而宽度计算按一格 → 横线比表格长一倍。
+  const all = modelTable(ALL, NEW_ONLY, 66, 1_000_000).map(line).join('');
+  expect(/[─-╿]/.test(all)).toBe(false); // 一个 box-drawing 字符都不许有
 });

@@ -38,6 +38,9 @@ const TURN_DEBOUNCE_MS = 15_000;
 // 人家的文档站，既不礼貌也没意义。失败后隔 6h 再试，别死磕。
 const CATALOG_TTL_MS = 24 * 3600_000;
 const CATALOG_RETRY_MS = 6 * 3600_000;
+// `/quota models` 是"显式要现在这张表"，所以强制重抓；但最多等这么久 ——
+// `$.http.fetch` 没有 timeout，网关黑洞会让它永远挂着，而这是个要立刻出结果的命令。
+const CATALOG_FORCE_WAIT_MS = 8000;
 // 取数的看门狗。$.http.fetch **没有 timeoutMs**（类型定义里 HttpInit 只有
 // method/headers/body/auth/socketPath），DNS 卡死或代理黑洞会让它永不 settle，
 // 而 inflight 只在 finally 里清空 —— 那样 refresh() 会永远返回同一个 pending
@@ -123,10 +126,17 @@ export function register(on) {
   on('command.run', { command: 'quota' }, async ($, e) => {
     const arg = String(e.args || '').trim().toLowerCase();
     if (arg === 'models' || arg === 'm' || arg === '模型') {
-      if (!catalog) {
-        await hydrate($);
-        refreshCatalog($, true);
-      }
+      if (!catalog) await hydrate($);
+      // 显式要这张表 = 要**现在**的真相，所以强制重抓一次
+      // （后台那份有 24h TTL，是给"随手看一眼"用的）。
+      //
+      // 但不能无限等：没有 timeout 的请求遇上网关黑洞会一直挂着，
+      // 而这是个要立刻出结果的命令。等一小会儿拿不到，就拿手里这份旧的 ——
+      // 表头会写清它是多久之前抓的，不会假装新鲜。
+      await Promise.race([
+        refreshCatalog($, true) || Promise.resolve(),
+        new Promise((r) => setTimeout(r, CATALOG_FORCE_WAIT_MS)),
+      ]);
       return { text: modelTableText(catalog, catDiff, Date.now()) };
     }
     if (!snap) await hydrate($);

@@ -22,6 +22,7 @@ import {
   planInfo,
   projectWindow,
   cycleProgress,
+  prettyPlanName,
   quotaColor,
   safeDailyBudget,
   tierOf,
@@ -705,4 +706,53 @@ test('拿不到会员名时退回档位词，而不是空着', () => {
   v.plan.name = '';
   const first = layout(120, v).segs[0];
   expect(['宽裕', '偏紧', '吃紧', '断粮', '采样中']).toContain(first.text);
+});
+
+// ────────────────────────────────────────────────────────────
+// 会员名不能写死
+//
+// 用户的话："这些东西都是会实时变动的，你写死了肯定是没有用的。"
+// `PLANS` 是一张写死的表 —— 官方加一档、或者改 id，表里就没有，面板上那一格会空着。
+// ────────────────────────────────────────────────────────────
+
+test('prettyPlanName 从接口给的 planId 推出名字，不用查表', () => {
+  expect(prettyPlanName('individual-goat')).toBe('Goat');
+  expect(prettyPlanName('individual-max')).toBe('Max');
+  expect(prettyPlanName('individual-max-10x')).toBe('Max 10x');
+  expect(prettyPlanName('teams-pro')).toBe('Pro');
+  expect(prettyPlanName('individual-ultra')).toBe('Ultra');
+  // 表里没有的未来档位也得有名字
+  expect(prettyPlanName('individual-titan')).toBe('Titan');
+  expect(prettyPlanName('')).toBe('');
+  expect(prettyPlanName(null)).toBe('');
+});
+
+test('官方加一档时面板不会空白 —— 名字从实时 planId 推出来', () => {
+  // 表里没有 individual-titan
+  expect(planInfo('individual-titan')).toBe(null);
+  const v = normalize(
+    {
+      credits: { credits: { monthlyCredits: 20 }, windowLimits: { limited: true,
+        fiveHour: { used: 1, cap: 14, resetAt: NOW + 3600000, exceeded: false },
+        weekly: { used: 2, cap: 35, resetAt: NOW + 86400000, exceeded: false } } },
+      subscription: { data: { status: 'active', planId: 'individual-titan',
+        currentPeriodStart: new Date(NOW - 5 * 86400000).toISOString(),
+        currentPeriodEnd: new Date(NOW + 25 * 86400000).toISOString() } },
+      summary: { totalCost: 10, totalCount: 100, averageCost: 0.1 },
+    },
+    { now: NOW },
+  );
+  expect(v.plan.name).toBe('Titan');
+
+  // 表里查得到的仍然用表里那个更好看的名字（GOAT 全大写）
+  const goat = normalize(raw(), { now: NOW });
+  expect(goat.plan.name).toBe('GOAT');
+});
+
+test('band 开头用的就是这个名字 —— 加一档也不会空着', () => {
+  const v = view5h();
+  v.plan.name = 'Titan';
+  const first = layout(120, v).segs[0];
+  expect(first.id).toBe('plan');
+  expect(first.text).toBe('Titan');
 });
