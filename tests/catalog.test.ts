@@ -199,7 +199,8 @@ const ALL = buildCatalog(
   'individual-goat',
   1_000_000,
 );
-const NEW_ONLY = catalogDiff(CAT, ALL); // Qwen 是新的，DeepSeek 改了价（budget 一样但 cost 一样？）
+const NEW_ONLY = catalogDiff(CAT, ALL);
+const NULLISH = null; // 没有上一份目录时 diff 传 null // Qwen 是新的，DeepSeek 改了价（budget 一样但 cost 一样？）
 
 const textOf = (rows) => rows.map((r) => r.map((x) => x.text).join(''));
 const cells = (rows) => rows.map((r) => r.map((x) => x.text));
@@ -213,88 +214,92 @@ test('modelTable 的标题说清口径、模型数和新鲜度', () => {
   expect(head).toContain('刚刚更新');
 });
 
-// 带框线的行：数据行以 `|` 开头，规则线以 `+` 开头。
-//
-// **框线只用 ASCII。** 第一版用的是 box-drawing（┌─┬┐│└┴┘），它们在 Unicode 里是
-// East Asian Ambiguous 宽度 —— 占一格还是两格**由字体决定**，中文环境下常被渲染成两格，
-// 于是横线比表格长一倍、整张表散架（用户截图报的正是这个）。
-// `+ - |` 是 ASCII（Na/N），任何字体下都是一格。这条断言把这个决定钉住。
-const isBoxRow = (r) => /^[|+]/.test(line(r));
-const isRuleRow = (r) => /^\+/.test(line(r));
 const w = (r) => dispWidth(line(r));
+// 表格行 = 标题之后、脚注之前的那几行
+const tableRows = (rows) => rows;
 
-test('modelTable 画的是带框线的表：顶线、表头、分隔线、数据、底线', () => {
-  const rows = modelTable(CAT, null, 78, 1_000_000);
+test('modelTable 的标题说清口径、模型数和新鲜度', () => {
+  const head = line(modelTable(CAT, null, 78, 1_000_000)[0]);
+  expect(head).toContain('每月可调用次数');
+  expect(head).toContain('2 个');
+  expect(head).toContain('刚刚更新');
+});
+
+test('modelTable **一行只能有一个段** —— 这是对齐的命根子', () => {
+  // 面板把每个段渲染成独立的文本节点，而**节点边界的空白会被吃掉**。
+  // 先前为了给标记单独染色把一行切成名字/标记/数字三段，补齐的空格正好落在边界上，
+  // 于是列全歪（用户截图报的）。一行一段，补齐空格就是这段文字的一部分，不会被重算。
+  for (const r of modelTable(ALL, NEW_ONLY, 50, 1_000_000)) {
+    expect(r.length).toBe(1);
+    expect(r[0].prio).toBe(0); // 且不可丢 —— 否则 fitSegments 会摘掉整行
+  }
+});
+
+test('modelTable 没有框线 —— 面板里画不出好看的线，那就不画', () => {
+  const all = modelTable(ALL, NEW_ONLY, 50, 1_000_000).map(line).join('');
+  // box-drawing 是 Ambiguous 宽度（字体说了算），ASCII 框线则显得笨重 —— 两版都试过了
+  expect(/[\u2500-\u257f]/.test(all)).toBe(false);
+  expect(/^\+[-+]*\+$/m.test(all)).toBe(false);
+  expect(all.includes('|')).toBe(false);
+});
+
+test('modelTable 是两列对齐的表：表头压在列上、每行等宽', () => {
+  const rows = modelTable(ALL, NULLISH, 50, 1_000_000);
   const L = rows.map(line);
-  expect(L[1].startsWith('+-')).toBe(true);
-  expect(L[1].endsWith('+')).toBe(true);
-  expect(L[2]).toContain('模型');
-  expect(L[2]).toContain('每月调用');
-  expect(L[3].startsWith('+-')).toBe(true);
-  // 三条规则线都长这样：+----+----+（ASCII 框线 —— 见下面那条断言）
-  expect(L.filter((l) => /^\+[+-]*\+$/.test(l)).length).toBe(3);
-  expect(L[4]).toContain('DeepSeek V4.1 Flash');
-  expect(L[4]).toContain('154,000');
+  const header = L[1];
+  const data = L.slice(2, rows.length - (L[L.length - 1].startsWith('…') ? 1 : 0));
+
+  // 每行等宽（除标题/脚注那两行自由流动的说明文字）
+  const widths = new Set(data.map((l) => dispWidth(l)));
+  expect(widths.size).toBe(1);
+  expect([...widths][0]).toBeLessThanOrEqual(49);
+
+  // 表头和数据行同宽 —— 说明用的是同一套列宽
+  expect(dispWidth(header)).toBe([...widths][0]);
+
+  // 数字列右对齐：每行末尾的数字串右边缘一致
+  const numberEnd = (l) => l.length; // 都是补齐到同一宽度
+  expect(new Set(data.map(numberEnd)).size).toBe(1);
+  expect(header.endsWith('每月调用')).toBe(true);
+  expect(data[0].endsWith('154,000')).toBe(true);
 });
 
-test('带框线的每一行**等宽** —— 这是这张表唯一真正的不变式', () => {
-  // 框线表散架的样子就是"某一行比别的宽一格"，竖线就错位了。
-  for (const cols of [78, 66, 56, 40]) {
-    const rows = modelTable(ALL, NEW_ONLY, cols, 1_000_000).filter(isBoxRow);
-    expect(rows.length).toBeGreaterThan(4);
-    const widths = new Set(rows.map(w));
-    expect(widths.size).toBe(1);
-    expect([...widths][0]).toBeLessThanOrEqual(cols - 1);
-  }
-});
-
-test('modelTable 每个段都是 prio 0 —— 否则 fitSegments 会把表拆散', () => {
-  // layoutPane 逐段裁剪：只要有一个段 prio > 0，超宽时它会被单独丢掉，
-  // 于是表里少一根竖线或一整列。宽度已经算好保证放得下，所以不该有可丢的段。
-  for (const r of modelTable(ALL, NEW_ONLY, 66, 1_000_000)) {
-    for (const seg of r) expect(seg.prio).toBe(0);
-  }
-});
-
-test('modelTable 把新增/改价的钉在最前面，标记单独一段带颜色', () => {
+test('modelTable 把新增/改价的钉在最前面，标记在名字列里', () => {
   const cheaper = { ...DEEPSEEK, rates: { ...DEEPSEEK.rates, inputCost: 0.075 } };
   const withNew = { name: 'Qwen 4.0 Turbo', budgetUsd: 20, rates: { inputCost: 0.1, outputCost: 0.2, cacheReadCost: 0.001 }, shape: { inputTokens: 800, outputTokens: 200, cacheReadTokens: 50000 } };
   const next = buildCatalog(parsePlanEstimates(page([SOL, cheaper, withNew])), 'individual-goat', 2);
-  const rows = modelTable(next, catalogDiff(CAT, next), 78, 2);
-  // 框行顺序：顶线 / 表头 / 分隔线 / 数据…/ 底线 —— 数据从下标 3 开始
-  const data = rows.filter(isBoxRow).slice(3, -1);
-  expect(line(data[0])).toContain('Qwen 4.0 Turbo');
-  expect(line(data[1])).toContain('DeepSeek V4.1 Flash');
-  // 标记必须是**独立的一段**且带颜色 —— 这样名字不会被染成绿的
-  const markSeg = (row) => row.find((s) => s.text.trim() === '★新' || s.text.trim() === '↑价');
-  const m0 = markSeg(data[0]);
-  expect(m0 && m0.text.trim()).toBe('★新');
-  expect(m0 && m0.color).toBe('success');
-  const m1 = markSeg(data[1]);
-  expect(m1 && m1.text.trim()).toBe('↑价');
-  expect(m1 && m1.color).toBe('warning');
-  expect(data[0][0].color).toBeFalsy(); // 名字那段不染色
+  const L = modelTable(next, catalogDiff(CAT, next), 78, 2).map(line);
+  // 0 标题 / 1 列头 / 2、3 被钉住的两个（★新 在前、↑价 在后）
+  expect(L[2]).toContain('Qwen 4.0 Turbo');
+  expect(L[2]).toContain('★新');
+  expect(L[3]).toContain('DeepSeek V4.1 Flash');
+  expect(L[3]).toContain('↑价');
+  // 标记在名字列内，所以有标记/没标记的行**一样宽**
+  const plain = modelTable(CAT, null, 78, 2).map(line);
+  expect(dispWidth(L[2])).toBe(dispWidth(plain[2]));
 });
 
-test('modelTable 窄的时候名字被截断，但表仍然等宽', () => {
-  const narrow = modelTable(ALL, null, 40, 1_000_000);
-  expect(narrow.map(line).some((l) => l.includes('…'))).toBe(true);
-  const box = narrow.filter(isBoxRow);
-  expect(new Set(box.map(w)).size).toBe(1);
-  expect(w(box[0])).toBeLessThanOrEqual(39);
+test('modelTable 窄的时候截断名字，列仍然对齐', () => {
+  const narrow = modelTable(ALL, null, 30, 1_000_000).map(line);
+  const data = narrow.slice(2, -1);
+  expect(data.some((l) => l.includes('…'))).toBe(true);
+  expect(new Set(data.map((l) => dispWidth(l))).size).toBe(1);
+  expect(dispWidth(data[0])).toBeLessThanOrEqual(29);
 });
 
-test('modelTable 太窄时退回纯列表 —— 不做框线，也不硬挤', () => {
-  const tiny = modelTable(ALL, null, 20, 1_000_000);
-  expect(tiny.filter(isRuleRow).length).toBe(0);
-  expect(tiny.map(line).join(' ')).toContain('DeepSeek');
+test('modelTable 行数受 limit 约束，并如实说还有多少没显示', () => {
+  // 夹具只有 3 个模型 → 标题 + 列头 + 3 行（全展示，没有脚注）
+  expect(modelTable(ALL, null, 50, 1_000_000).length).toBe(2 + 3);
+  // limit=2 → 标题 + 列头 + 2 行 + 脚注
+  const two = modelTable(ALL, null, 50, 1_000_000, 2).map(line);
+  expect(two.length).toBe(3 + 2);
+  expect(two.join(' ')).toContain('其余 1 个');
+  expect(two.join(' ')).toContain('/quota models');
 });
 
-test('modelTable 行数 = 模型数 + 4（顶线/表头/分隔线/底线），且随 limit 收敛', () => {
-  // 夹具只有 3 个模型
-  expect(modelTable(ALL, null, 78, 1_000_000).filter(isBoxRow).length).toBe(3 + 4);
-  expect(modelTable(ALL, null, 78, 1_000_000, 2).filter(isBoxRow).length).toBe(2 + 4);
-  expect(modelTable(ALL, null, 78, 1_000_000, 2).map(line).join(' ')).toContain('其余 1 个');
+test('没有目录时整段不出现 —— 拿不到官方表不该让面板少别的东西', () => {
+  expect(modelTable(null, null, 78, 1)).toEqual([]);
+  expect(modelTable({ models: [] }, null, 78, 1)).toEqual([]);
 });
 
 test('modelTableText 是 markdown 表格 —— 空格对齐在会话里会被吃掉', () => {
@@ -337,7 +342,7 @@ test('layoutPane 带上目录才长出那一段，不带就一个字都不多', 
   expect(withCat).toContain('Qwen 4.0 Turbo');
 });
 
-test('模型表里出现的颜色也必须过引擎那一关', () => {
+test('模型表里出现的颜色都必须过引擎那一关', () => {
   // 引擎只认 /^[#a-zA-Z0-9_().,% -]{1,40}$/ —— 写错一处颜色，**整棵 band 树**被丢。
   // 这条是那次事故（ansi:red）留下的护栏，凡是会上屏的颜色都要过一遍。
   const COLOR_RE = /^[#a-zA-Z0-9_().,% -]{1,40}$/;
@@ -345,9 +350,9 @@ test('模型表里出现的颜色也必须过引擎那一关', () => {
   const bad = [];
   for (const r of rows) for (const seg of r) if (seg.color && !COLOR_RE.test(seg.color)) bad.push(seg.color);
   expect(bad).toEqual([]);
-  // 标记确实带了颜色（否则这条测试是空转的）
-  const colored = rows.flat().filter((s) => s.color);
-  expect(colored.length).toBeGreaterThan(0);
+  // 现在整行一段，**标记没法单独染色**（染了整行都变绿）。这是为了让列对齐做的取舍：
+  // 一行切成多段，段边界的补齐空格会被吃掉，列就歪了。★新 / ↑价 靠字形本身醒目。
+  expect(rows.flat().filter((seg) => seg.color).length).toBe(0);
 });
 
 // ────────────────────────────────────────────────────────────
